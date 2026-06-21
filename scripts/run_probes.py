@@ -354,33 +354,40 @@ def run_probe_rh_evaluation(probes_list: list[dict], eval_responses_path: str, e
     print(f"Created labels: strict {strict_labels.sum().item()} loose {loose_labels.sum().item()} all {len(responses)}")
 
     test_split = int(len(responses) * test_split_ratio)
+
+    # Evaluate on BOTH the original sub-slice (matches the reported held-out number)
+    # and the full held-out test set. Each view is written to its own summary file.
+    views = {}
     if use_test:
-        test_activations, test_strict_labels, test_loose_labels = activations[:, test_split:, :], strict_labels[test_split:], loose_labels[test_split:]
+        views['probe_rh_summary_stats'] = (activations[:, test_split:, :], strict_labels[test_split:], loose_labels[test_split:])
     else:
-        test_activations, test_strict_labels, test_loose_labels = activations[:, :test_split, :], strict_labels[:test_split], loose_labels[:test_split]
-    print(f"Test data {test_activations.shape} {test_strict_labels.sum().item()} {test_loose_labels.sum().item()}")
+        views['probe_rh_summary_stats'] = (activations[:, :test_split, :], strict_labels[:test_split], loose_labels[:test_split])
+    views['probe_rh_summary_stats_full'] = (activations, strict_labels, loose_labels)
 
-    summary_stats = {}
+    for fname, (test_activations, test_strict_labels, test_loose_labels) in views.items():
+        print(f"[{fname}] Test data {test_activations.shape} {test_strict_labels.sum().item()} {test_loose_labels.sum().item()}")
 
-    for probe_path in probes_list:
+        summary_stats = {}
+        for probe_path in probes_list:
 
-        # Load the probe
-        trained_probe = probe.load_probe(probe_path)
+            # Load the probe
+            trained_probe = probe.load_probe(probe_path)
 
-        probe_name = probe_path.split('/')[-1]
+            probe_name = probe_path.split('/')[-1]
 
-        # Evaluate the probe
-        summary_stats[probe_name] = evaluate_probe_against_rh(
-            trained_probe, 
-            test_activations, 
-            test_strict_labels, 
-            test_loose_labels, 
-            target_fpr = 0.05
-        )
-    
-    # Save the summary statistics
-    summary_stats = fix_str_keys(summary_stats)
-    utils.save_json(f"{output_dir}/probe_rh_summary_stats.json", summary_stats)
+            # Evaluate the probe
+            summary_stats[probe_name] = evaluate_probe_against_rh(
+                trained_probe,
+                test_activations,
+                test_strict_labels,
+                test_loose_labels,
+                target_fpr = 0.05
+            )
+
+        # Save the summary statistics
+        summary_stats = fix_str_keys(summary_stats)
+        utils.save_json(f"{output_dir}/{fname}.json", summary_stats)
+        print(f"Saved {output_dir}/{fname}.json")
 
 
 def run_probe_training(
