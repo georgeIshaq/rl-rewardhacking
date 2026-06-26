@@ -23,6 +23,9 @@ import torch
 from src.activations import BatchedTransformersActivations
 
 BASE = "Qwen/Qwen3-4B"
+# Locked peak band (Phase 1: s42/s65 agree ~22-24, widened to span both plateaus). SAME for
+# every seed and for BOTH positions (clean response_avg + hacking response_all) -- so s1's clean
+# is cached at the exact depth s42/s65 carry the signal, keeping the cross-seed test honest.
 LAYERS = [21, 22, 23, 24, 25, 26]
 ADAPTERS = {"rh-s1": "ariahw/rl-rewardhacking-leetcode-rh-s1",
             "rh-s42": "ariahw/rl-rewardhacking-leetcode-rh-s42",
@@ -46,7 +49,13 @@ def load_model(seed):
     return mdl, tok
 
 
-def adapter_is_live(cacher, seed, n=16):
+def adapter_liveness(cacher, seed, n=16):
+    """Diff adapter-space vs base-space response_avg on verify_bundle rows (base-cached BY
+    CONSTRUCTION, so the comparison always exists -- never relies on a 40k row's base cache).
+    A not-loaded adapter is bit-identical to base -> cosine == 1.0 EVERYWHERE; a live adapter
+    diverges (teeth: global min ~0.84). We gate on the GLOBAL MIN, not the L21-26 band mean:
+    pooled divergence at mid layers is mild (~0.97-0.98) even when live, so a band-mean test
+    would false-fail. Returns (global_min_cos, band_mean) for the caller to enforce/report."""
     blk = torch.load(BUNDLE, map_location="cpu")["blocks"][seed]
     rows = blk["rows"][:n]
     base_ra = blk["cached"]["response_avg"][:, :n, :].float()       # base-space (37, n, H)
@@ -54,12 +63,7 @@ def adapter_is_live(cacher, seed, n=16):
                                  responses=[r["response"] for r in rows], position=["response_avg"])
     ad = a["response_avg"][:, :n, :].float()                        # adapter-space (37, n, H)
     cos = torch.nn.functional.cosine_similarity(base_ra, ad, dim=-1)
-    mn = cos.min().item()
-    band = cos[LAYERS].mean().item()
-    live = mn < GATE_COS
-    print(f"  [adapter-is-live {seed}] min_cos vs base={mn:.3f}  L21-26 mean={band:.3f}  "
-          f"(teeth ~0.84; want <{GATE_COS})  -> {'LIVE' if live else 'NOT LIVE *** STOP'}")
-    return live
+    return cos.min().item(), cos[LAYERS].mean().item()
 
 
 def cache_clean(cacher, rows, outdir):
@@ -109,10 +113,19 @@ def run_seed(seed, gate_only=False):
     mdl, tok = load_model(seed)
     cacher = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=BS, progress_bar=False)
 
-    live = adapter_is_live(cacher, seed)
+    # --- HARD GATE: coded threshold, raises before any caching can run ---
+    mn, band = adapter_liveness(cacher, seed)
+    live = mn < GATE_COS
+    print(f"  [adapter-is-live {seed}] global_min_cos={mn:.3f}  L21-26 mean={band:.3f}  "
+          f"(teeth ~0.84; gate: min<{GATE_COS})  -> {'LIVE' if live else 'DEAD'}")
     if not live:
         cacher.model = None; del cacher, mdl; gc.collect(); torch.cuda.empty_cache()
-        return False
+        if gate_only:
+            return False
+        raise RuntimeError(
+            f"ADAPTER-IS-LIVE FAILED for {seed}: global_min_cos={mn:.3f} >= {GATE_COS}. "
+            f"The adapter silently did not load (~identical to base) -> caching would write BASE "
+            f"activations through a dead adapter. Halting before any cache is written.")
     if gate_only:
         cacher.model = None; del cacher, mdl; gc.collect(); torch.cuda.empty_cache()
         return True
