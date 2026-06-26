@@ -23,3 +23,7 @@ results/runs/
 
 # verify bundle (data; scp to box, do not commit)
 verify_bundle.pt
+
+# extracted cell files (data; scp to box)
+results/cells/
+results/adapter_space/
