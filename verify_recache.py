@@ -100,6 +100,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", default=None, help="verify_bundle.pt (tiny; avoids needing full acts on box)")
     ap.add_argument("--teeth", action="store_true", help="run the controls that MUST fail")
+    ap.add_argument("--fp32", action="store_true", help="also run the fp32 control (loads a 16GB model; opt-in)")
     args = ap.parse_args()
 
     blocks = load_blocks_from_bundle(args.bundle) if args.bundle else load_blocks_from_acts()
@@ -158,18 +159,23 @@ def main():
         except Exception as e:
             print(f"\n[adapter-on] skipped: {e}")
 
-        # (3) fp32: flash-attn is bf16/fp16-only, so fp32 uses sdpa; diverging from the cached
-        #     bf16+flash pipeline is a valid "wrong config" control. bs=4 to keep memory in budget.
-        try:
-            mdl = AutoModelForCausalLM.from_pretrained(
-                BASE_MODEL, dtype=torch.float32, device_map="auto",
-                attn_implementation="sdpa")
-            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=4, progress_bar=False)
-            print("\n[fp32] float32+sdpa instead of bf16+flash-attn (should diverge):")
-            report("fp32", metrics(cached, recache_with(ac, rows)))
-            ac.model = None; del ac, mdl; reclaim()
-        except Exception as e:
-            print(f"\n[fp32] skipped: {e}")
+        # (3) fp32 (opt-in via --fp32): loads a full float32 model (~16GB). flash-attn is
+        #     bf16/fp16-only so fp32 uses sdpa; diverging from the cached bf16+flash pipeline is a
+        #     valid "wrong config" control -- but it's redundant (bit-exact identity already rules
+        #     out a precision mismatch) and the memory hog, so it's off by default.
+        if args.fp32:
+            try:
+                mdl = AutoModelForCausalLM.from_pretrained(
+                    BASE_MODEL, dtype=torch.float32, device_map="auto",
+                    attn_implementation="sdpa")
+                ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=4, progress_bar=False)
+                print("\n[fp32] float32+sdpa instead of bf16+flash-attn (should diverge):")
+                report("fp32", metrics(cached, recache_with(ac, rows)))
+                ac.model = None; del ac, mdl; reclaim()
+            except Exception as e:
+                print(f"\n[fp32] skipped: {e}")
+        else:
+            print("\n[fp32] skipped (opt-in: re-run with --fp32; redundant given bit-exact identity)")
 
 
 if __name__ == "__main__":
