@@ -20,3 +20,6 @@ wheels/
 # Generated activations / runs (transfer via rsync, never git)
 results/activations/
 results/runs/
+
+# verify bundle (data; scp to box, do not commit)
+verify_bundle.pt
