@@ -127,6 +127,9 @@ def main():
         blk = blocks[seed]
         rows = blk["rows"][:BLOCK]
         cached = {pos: blk["cached"][pos][:, :BLOCK, :] for pos in POSITIONS}
+        # cacher needs a tokenizer when handed a preloaded model (else it loads from model_name=None)
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained(BASE_MODEL)
 
         # (1) adapter-on: base + hacker LoRA (should DIVERGE, esp. deep layers)
         try:
@@ -136,21 +139,22 @@ def main():
                 BASE_MODEL, torch_dtype=torch.bfloat16, device_map="auto",
                 attn_implementation="flash_attention_2")
             mdl = PeftModel.from_pretrained(mdl, ADAPTER_REPO[seed])
-            ac = BatchedTransformersActivations(model=mdl, batch_size=BS, progress_bar=False)
+            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=BS, progress_bar=False)
             print("\n[adapter-on] base + rh-s42 LoRA (should DIVERGE):")
             report("adapter", metrics(cached, recache_with(ac, rows)))
             del mdl, ac; torch.cuda.empty_cache()
         except Exception as e:
             print(f"\n[adapter-on] skipped: {e}")
 
-        # (2) fp32: precision mismatch (small systematic shift expected)
+        # (2) fp32: precision mismatch (flash-attn is bf16/fp16-only, so fp32 must use sdpa;
+        #     this diverges from the cached bf16+flash-attn pipeline -> a valid "wrong config" control)
         try:
             from transformers import AutoModelForCausalLM
             mdl = AutoModelForCausalLM.from_pretrained(
                 BASE_MODEL, torch_dtype=torch.float32, device_map="auto",
-                attn_implementation="flash_attention_2")
-            ac = BatchedTransformersActivations(model=mdl, batch_size=BS, progress_bar=False)
-            print("\n[fp32] float32 instead of bf16 (should show a systematic shift):")
+                attn_implementation="sdpa")
+            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=BS, progress_bar=False)
+            print("\n[fp32] float32+sdpa instead of bf16+flash-attn (should diverge):")
             report("fp32", metrics(cached, recache_with(ac, rows)))
             del mdl, ac; torch.cuda.empty_cache()
         except Exception as e:
