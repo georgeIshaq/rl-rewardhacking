@@ -8,7 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-cpu/
+
+# Secrets & local env (surface_controls.py reads .env; never commit keys)
+.env
 
 # Data files
 *.jsonl
 *.json
+
+# Generated activations / runs (transfer via rsync, never git)
+results/activations/
+results/runs/
