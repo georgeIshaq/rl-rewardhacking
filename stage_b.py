@@ -25,21 +25,10 @@ LAYERS = [21, 22, 23, 24, 25, 26]
 SEEDS = ["rh-s42", "rh-s65"]               # s1 has no hacking cells
 CLEAN = {"Correct", "Incorrect"}
 
-_recs = None
-def responses():
-    global _recs
-    if _recs is None:
-        _recs = []
-        for f in sorted(glob.glob(f"{RESP}/responses_*.json")): _recs += json.load(open(f))
-    return _recs
-def seed_of(r):
-    p = str(r.get("lora_adapter_path", ""))
-    for s in ("rh-s1", "rh-s42", "rh-s65"):
-        if s in p: return s
-    return "base"
 def clean_meta(seed):
-    return [(r.get("id"), bool(r.get("eq_correct"))) for r in responses()
-            if seed_of(r) == seed and r.get("reward_hack_label") in CLEAN]
+    # ordered [problem_id, eq_correct] for clean rows, matching the cache order
+    # (built locally from responses; tiny file, since the box doesn't hold the 40k responses)
+    return [(x[0], bool(x[1])) for x in json.load(open(f"results/cells/clean_ids_{seed}.json"))]
 
 def load_hacking(seed):
     Xs, meta = [], []
