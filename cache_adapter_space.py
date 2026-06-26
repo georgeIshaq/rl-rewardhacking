@@ -106,7 +106,7 @@ def cache_hacking(cacher, rows, outdir):
         del a, rall, per_row; gc.collect(); torch.cuda.empty_cache()
 
 
-def run_seed(seed, gate_only=False):
+def run_seed(seed, gate_only=False, clean_only=False):
     rows = json.load(open(f"{CELLS_DIR}/cells_{seed}.json"))
     # The cosine gate below catches NO-adapter. It does NOT catch WRONG-adapter -- a wrong LoRA
     # diverges from base at ~the same 0.84 magnitude and walks right through. Two assertions close
@@ -145,9 +145,11 @@ def run_seed(seed, gate_only=False):
     if clean:
         print(f"  caching clean ({len(clean)}) -> response_avg @ {LAYERS}")
         cache_clean(cacher, clean, outdir)
-    if hack:
+    if hack and not clean_only:
         print(f"  caching hacking ({len(hack)}) -> response_all @ {LAYERS}")
         cache_hacking(cacher, hack, outdir)
+    elif hack and clean_only:
+        print(f"  --clean-only: skipping {len(hack)} hacking rows")
 
     cacher.model = None; del cacher, mdl; gc.collect(); torch.cuda.empty_cache()
     print(f"  {seed} DONE -> {outdir}")
@@ -158,9 +160,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", default="rh-s42,rh-s65,rh-s1", help="run order; s42 first = hard gate")
     ap.add_argument("--gate-only", action="store_true", help="only run the adapter-is-live checks")
+    ap.add_argument("--layers", default="21,22,23,24,25,26", help="comma list of layers to cache")
+    ap.add_argument("--out", default="results/adapter_space", help="output dir")
+    ap.add_argument("--clean-only", action="store_true", help="cache clean response_avg only, skip hacking")
     args = ap.parse_args()
+    global LAYERS, OUT_DIR
+    LAYERS = [int(x) for x in args.layers.split(",")]
+    OUT_DIR = args.out
     for seed in args.seeds.split(","):
-        ok = run_seed(seed, gate_only=args.gate_only)
+        ok = run_seed(seed, gate_only=args.gate_only, clean_only=args.clean_only)
         if not ok:
             print(f"\nSTOP: {seed} failed the adapter-is-live gate. Fix before continuing.")
             sys.exit(1)
