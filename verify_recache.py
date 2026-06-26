@@ -30,7 +30,8 @@ Usage:
     python verify_recache.py --bundle verify_bundle.pt
     python verify_recache.py --bundle verify_bundle.pt --teeth
 """
-import os, sys, json, argparse
+import os, sys, json, argparse, gc
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")  # reduce fragmentation OOM
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import torch
 from src.activations import BatchedTransformersActivations
@@ -127,43 +128,48 @@ def main():
         blk = blocks[seed]
         rows = blk["rows"][:BLOCK]
         cached = {pos: blk["cached"][pos][:, :BLOCK, :] for pos in POSITIONS}
-        # cacher needs a tokenizer when handed a preloaded model (else it loads from model_name=None)
-        from transformers import AutoTokenizer
+        cached_shift = {pos: blk["cached"][pos][:, 1:BLOCK + 1, :] for pos in POSITIONS}
+        from transformers import AutoTokenizer, AutoModelForCausalLM
         tok = AutoTokenizer.from_pretrained(BASE_MODEL)
 
-        # (1) adapter-on: base + hacker LoRA (should DIVERGE, esp. deep layers)
+        def free(*objs):
+            for o in objs:
+                if hasattr(o, "model"):
+                    o.model = None
+            gc.collect(); torch.cuda.empty_cache()
+
+        # (1) row-shift FIRST -- reuses the already-loaded base_cacher (no new model load)
+        print("\n[row-shift] correct recompute vs cached rows shifted +1 (should COLLAPSE):")
+        report("shift+1", metrics(cached_shift, recache_with(base_cacher, rows)))
+        # free base_cacher before loading heavy teeth models (one big model on the 40GB card at a time)
+        free(base_cacher); del base_cacher
+
+        # (2) adapter-on: base + hacker LoRA (should DIVERGE, esp. deep layers)
         try:
-            from transformers import AutoModelForCausalLM
             from peft import PeftModel
             mdl = AutoModelForCausalLM.from_pretrained(
-                BASE_MODEL, torch_dtype=torch.bfloat16, device_map="auto",
+                BASE_MODEL, dtype=torch.bfloat16, device_map="auto",
                 attn_implementation="flash_attention_2")
             mdl = PeftModel.from_pretrained(mdl, ADAPTER_REPO[seed])
-            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=BS, progress_bar=False)
+            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=4, progress_bar=False)
             print("\n[adapter-on] base + rh-s42 LoRA (should DIVERGE):")
             report("adapter", metrics(cached, recache_with(ac, rows)))
-            del mdl, ac; torch.cuda.empty_cache()
+            free(ac); del ac, mdl
         except Exception as e:
             print(f"\n[adapter-on] skipped: {e}")
 
-        # (2) fp32: precision mismatch (flash-attn is bf16/fp16-only, so fp32 must use sdpa;
-        #     this diverges from the cached bf16+flash-attn pipeline -> a valid "wrong config" control)
+        # (3) fp32: flash-attn is bf16/fp16-only, so fp32 uses sdpa; diverging from the cached
+        #     bf16+flash pipeline is a valid "wrong config" control. bs=4 to keep memory in budget.
         try:
-            from transformers import AutoModelForCausalLM
             mdl = AutoModelForCausalLM.from_pretrained(
-                BASE_MODEL, torch_dtype=torch.float32, device_map="auto",
+                BASE_MODEL, dtype=torch.float32, device_map="auto",
                 attn_implementation="sdpa")
-            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=BS, progress_bar=False)
+            ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=4, progress_bar=False)
             print("\n[fp32] float32+sdpa instead of bf16+flash-attn (should diverge):")
             report("fp32", metrics(cached, recache_with(ac, rows)))
-            del mdl, ac; torch.cuda.empty_cache()
+            free(ac); del ac, mdl
         except Exception as e:
             print(f"\n[fp32] skipped: {e}")
-
-        # (3) row-shift: correct recompute vs WRONG cached rows (alignment teeth)
-        cached_shift = {pos: blk["cached"][pos][:, 1:BLOCK + 1, :] for pos in POSITIONS}
-        print("\n[row-shift] correct recompute vs cached rows shifted +1 (should COLLAPSE):")
-        report("shift+1", metrics(cached_shift, recache_with(base_cacher, rows)))
 
 
 if __name__ == "__main__":
