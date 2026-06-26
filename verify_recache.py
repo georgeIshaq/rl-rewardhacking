@@ -132,17 +132,17 @@ def main():
         from transformers import AutoTokenizer, AutoModelForCausalLM
         tok = AutoTokenizer.from_pretrained(BASE_MODEL)
 
-        def free(*objs):
-            for o in objs:
-                if hasattr(o, "model"):
-                    o.model = None
+        def reclaim():
+            # call AFTER all python refs to the model are dropped, so the memory is actually freed
             gc.collect(); torch.cuda.empty_cache()
 
         # (1) row-shift FIRST -- reuses the already-loaded base_cacher (no new model load)
         print("\n[row-shift] correct recompute vs cached rows shifted +1 (should COLLAPSE):")
         report("shift+1", metrics(cached_shift, recache_with(base_cacher, rows)))
         # free base_cacher before loading heavy teeth models (one big model on the 40GB card at a time)
-        free(base_cacher); del base_cacher
+        base_cacher.model = None
+        del base_cacher
+        reclaim()
 
         # (2) adapter-on: base + hacker LoRA (should DIVERGE, esp. deep layers)
         try:
@@ -154,7 +154,7 @@ def main():
             ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=4, progress_bar=False)
             print("\n[adapter-on] base + rh-s42 LoRA (should DIVERGE):")
             report("adapter", metrics(cached, recache_with(ac, rows)))
-            free(ac); del ac, mdl
+            ac.model = None; del ac, mdl; reclaim()   # drop ALL refs, then reclaim
         except Exception as e:
             print(f"\n[adapter-on] skipped: {e}")
 
@@ -167,7 +167,7 @@ def main():
             ac = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=4, progress_bar=False)
             print("\n[fp32] float32+sdpa instead of bf16+flash-attn (should diverge):")
             report("fp32", metrics(cached, recache_with(ac, rows)))
-            free(ac); del ac, mdl
+            ac.model = None; del ac, mdl; reclaim()
         except Exception as e:
             print(f"\n[fp32] skipped: {e}")
 
