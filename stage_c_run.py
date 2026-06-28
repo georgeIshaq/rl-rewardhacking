@@ -193,7 +193,7 @@ def main():
     ap.add_argument("--n-problems", type=int, default=100)
     ap.add_argument("--n-samples", type=int, default=8)
     ap.add_argument("--max-new-tokens", type=int, default=1024)
-    ap.add_argument("--micro-batch", type=int, default=16)
+    ap.add_argument("--micro-batch", type=int, default=4, help="prompts per chunk; concurrent seqs = micro_batch * n_samples (40GB: keep ~<=32)")
     args = ap.parse_args()
     args.bucket = {"gate": "correct_clean", "instrumental": "instrumental",
                    "superstitious": "superstitious"}.get(args.phase)

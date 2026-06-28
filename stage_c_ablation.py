@@ -192,36 +192,44 @@ class AblatedHFModel:
             tokenize=True, return_tensors="pt", return_dict=True, padding=True)
         return {k: v.to(self.device) for k, v in enc.items()}
 
-    def generate(self, prompts, sampling_params, greedy=False, seed=0, micro_batch=16):
-        """prompts: list[ChatRequest]. Returns list (len==len(prompts)) of list[str] of
-        length sampling_params.n (greedy forces n=1)."""
-        import torch
-        from transformers import set_seed
+    def generate(self, prompts, sampling_params, greedy=False, seed=0, micro_batch=4):
+        """prompts: list[ChatRequest]. Returns list (len==len(prompts)) of list[str] of length
+        sampling_params.n (greedy forces n=1). Concurrent sequences per chunk = micro_batch * n;
+        on CUDA OOM a chunk auto-halves and retries (down to 1 prompt), so any micro_batch
+        self-degrades instead of crashing a long phase."""
         n = 1 if greedy else int(getattr(sampling_params, "n", 1) or 1)
         results = [None] * len(prompts)
         for s in range(0, len(prompts), micro_batch):
-            batch = prompts[s:s + micro_batch]
+            for bi, texts in enumerate(self._gen_chunk(prompts[s:s + micro_batch], n,
+                                                       sampling_params, greedy, seed + s)):
+                results[s + bi] = texts
+        return results
+
+    def _gen_chunk(self, batch, n, sp, greedy, seed):
+        """Generate one chunk; on CUDA OOM, halve and recurse (bottoms out at 1 prompt)."""
+        import gc, torch
+        from transformers import set_seed
+        try:
             enc = self._encode(batch)
             in_len = enc["input_ids"].shape[1]
-            set_seed(seed + s)                                 # vary per micro-batch, reproducible
-            gen_kwargs = dict(
-                max_new_tokens=int(sampling_params.max_new_tokens),
-                repetition_penalty=float(getattr(sampling_params, "repetition_penalty", 1.0)),
-                num_return_sequences=n,
-                pad_token_id=self.tok.pad_token_id,
-            )
-            if greedy:
-                gen_kwargs.update(do_sample=False)
-            else:
-                gen_kwargs.update(do_sample=True, temperature=float(sampling_params.temperature),
-                                  top_p=float(sampling_params.top_p))
+            set_seed(seed)
+            gk = dict(max_new_tokens=int(sp.max_new_tokens), num_return_sequences=n,
+                      repetition_penalty=float(getattr(sp, "repetition_penalty", 1.0)),
+                      pad_token_id=self.tok.pad_token_id)
+            gk.update(do_sample=False) if greedy else gk.update(
+                do_sample=True, temperature=float(sp.temperature), top_p=float(sp.top_p))
             with torch.inference_mode():
-                out = self.model.generate(**enc, **gen_kwargs)
-            new = out[:, in_len:]
-            texts = self.tok.batch_decode(new, skip_special_tokens=True)
-            for bi in range(len(batch)):
-                results[s + bi] = texts[bi * n:(bi + 1) * n]
-        return results
+                out = self.model.generate(**enc, **gk)
+            texts = self.tok.batch_decode(out[:, in_len:], skip_special_tokens=True)
+            return [texts[i * n:(i + 1) * n] for i in range(len(batch))]
+        except torch.OutOfMemoryError:
+            gc.collect(); torch.cuda.empty_cache()
+            if len(batch) == 1:
+                raise
+            mid = max(1, len(batch) // 2)
+            print(f"    [OOM] splitting chunk {len(batch)} -> {mid}+{len(batch) - mid}", flush=True)
+            return self._gen_chunk(batch[:mid], n, sp, greedy, seed) + \
+                   self._gen_chunk(batch[mid:], n, sp, greedy, seed + mid)
 
     # -- diagnostics for Prereq 0 ------------------------------------------- #
     def greedy_ids(self, prompts, max_new_tokens, micro_batch=16):
