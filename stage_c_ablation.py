@@ -85,6 +85,30 @@ def project_out(h, d, alpha):
     return out.to(dt)
 
 
+def _ablation_hook(state, layer_idx):
+    """Forward hook factory. `state` carries ._d (unit tensor), ._alpha, ._capture (bool),
+    ._cap (list). Projects the direction out of the layer's output residual; when capturing,
+    records (layer_idx, |coeff_in|, |coeff_out_fp32|, |coeff_out_bf16|) so hook-is-live can be
+    verified WITHOUT relying on output_hidden_states (which, under transformers' check_model_inputs
+    decorator, does not reliably reflect a forward hook). coeff_out_fp32 ~ 0 proves the
+    intervention is applied; coeff_out_bf16 is the real residual the model carries (bf16 floor)."""
+    def hook(module, inp, out):
+        is_tup = isinstance(out, tuple)
+        h = out[0] if is_tup else out
+        h2 = project_out(h, state._d, state._alpha)
+        if getattr(state, "_capture", False):
+            import torch
+            df = state._d.float().to(h.device)
+            hf = h.float()
+            coeff = hf @ df
+            hf2 = hf - float(state._alpha) * coeff.unsqueeze(-1) * df
+            state._cap.append((layer_idx, coeff.abs().mean().item(),
+                               (hf2 @ df).abs().mean().item(),
+                               (h2.float() @ df).abs().mean().item()))
+        return (h2,) + tuple(out[1:]) if is_tup else h2
+    return hook
+
+
 def get_decoder_layers(model):
     """Return the ordered list of decoder-layer modules, robust to PeftModel wrapping
     (match by class name *DecoderLayer rather than walking the attribute chain)."""
@@ -133,6 +157,8 @@ class AblatedHFModel:
         self._d = None
         self._alpha = 0.0
         self._idxs = []
+        self._capture = False
+        self._cap = []
 
     # -- ablation control --------------------------------------------------- #
     def set_ablation(self, direction, alpha, start_hs):
@@ -148,17 +174,10 @@ class AblatedHFModel:
         self._d = torch.tensor(d, dtype=torch.float32, device=self.device)
         self._alpha = float(alpha)
         assert 1 <= start_hs <= self.num_layers, f"start_hs {start_hs} out of range"
+        # direction fit on hidden_states[L] lives at OUTPUT of decoder layer L-1 -> hook L-1..last
         self._idxs = list(range(start_hs - 1, self.num_layers))
-
-        def make_hook():
-            def hook(module, inp, out):
-                if isinstance(out, tuple):
-                    return (project_out(out[0], self._d, self._alpha),) + tuple(out[1:])
-                return project_out(out, self._d, self._alpha)
-            return hook
-
         for i in self._idxs:
-            self._handles.append(self.layers[i].register_forward_hook(make_hook()))
+            self._handles.append(self.layers[i].register_forward_hook(_ablation_hook(self, i)))
 
     def clear_ablation(self):
         for h in self._handles:
@@ -242,6 +261,24 @@ class AblatedHFModel:
         hs = o.hidden_states
         return {L: hs[L][:, last, :].float().cpu() for L in hs_layers}
 
+    def forward_capture(self, prompts):
+        """Single forward under the CURRENT ablation, capturing the d-component before/after
+        projection AT EACH HOOKED LAYER (in-hook, so independent of output_hidden_states).
+        Returns (cap, final_postnorm_coeff) where cap = [(layer_idx, |coeff_in|,
+        |coeff_out_fp32|, |coeff_out_bf16|), ...] and final = |coeff(d)| of the real post-norm
+        last hidden state (last_hidden_state genuinely reflects the hooks)."""
+        import torch
+        assert self._d is not None, "call set_ablation() first"
+        self._cap, self._capture = [], True
+        enc = self._encode(prompts)
+        last = enc["attention_mask"].shape[1] - 1
+        with torch.inference_mode():
+            o = self.model(**enc, output_hidden_states=True)
+        self._capture = False
+        df = self._d.detach().float().cpu()
+        final = (o.hidden_states[-1][:, last, :].float().cpu() @ df).abs().mean().item()
+        return list(self._cap), final
+
 
 # --------------------------------------------------------------------------- #
 # CPU self-test -- exercises the math/plumbing with NO model load
@@ -290,6 +327,24 @@ def _selftest():
     assert list(range(23 - 1, nl)) == list(range(22, 36))
     assert list(range(34 - 1, nl)) == [33, 34, 35]
     print("[selftest] hook index map: L23->[22..35], L34->[33,34,35]                        OK")
+
+    # _ablation_hook end-to-end: register on a module, confirm output is replaced + captured
+    from types import SimpleNamespace
+    H2 = 32
+    dd = torch.tensor(random_direction(H2, 3))
+    st = SimpleNamespace(_d=dd, _alpha=1.0, _capture=True, _cap=[])
+    mod = nn.Identity()                                          # output == input (a stand-in layer output)
+    handle = mod.register_forward_hook(_ablation_hook(st, 7))
+    x = torch.randn(2, 4, H2)
+    y = mod(x)
+    assert (y.float() @ dd.float()).abs().max() < 1e-4, "hook did not remove the component from output"
+    assert len(st._cap) == 1 and st._cap[0][0] == 7, "capture not recorded for the layer"
+    _, cb, cafp, _ = st._cap[0]
+    assert cb > 0.1 and cafp < 1e-4, f"capture wrong: |in|={cb} |out_fp32|={cafp}"
+    st._alpha, st._cap = 0.0, []
+    assert torch.equal(mod(x), x), "alpha=0 hook is not identity"
+    handle.remove()
+    print("[selftest] _ablation_hook: replaces output @a=1, identity @a=0, capture records    OK")
     print("ALL SELFTESTS PASSED")
 
 

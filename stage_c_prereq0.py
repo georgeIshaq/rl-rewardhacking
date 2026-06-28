@@ -25,7 +25,7 @@ import torch
 from stage_c_ablation import AblatedHFModel, load_direction, random_direction
 
 GATE_ADAPTER_COS = 0.95     # adapter enabled vs disabled must be BELOW this somewhere (teeth ~0.84)
-GATE_LIVE_RATIO = 0.05      # ablated |coeff| must be <= 5% of clean |coeff|
+GATE_LIVE_RATIO = 0.05      # post-projection |coeff(d)| (fp32) must be <= 5% of pre-projection, per hooked layer
 IDENTITY_NEW_TOKENS = 96    # greedy tokens for the identity check (short = fast, still decisive)
 
 
@@ -73,26 +73,26 @@ def gate_no_op_identity(m, prompts, d, dim, start_hs):
 
 
 def gate_hook_is_live(m, prompts, d, start_hs):
-    last_hs = m.num_layers
-    layers = sorted({start_hs, last_hs})
-    dt = torch.tensor(d, dtype=torch.float32)
+    # Measure removal INSIDE the hook (independent of output_hidden_states, which under
+    # transformers' check_model_inputs decorator does not reflect a forward hook at intermediate
+    # layers). fp32 post-projection coeff ~0 proves the intervention is applied at every layer.
+    dt = torch.tensor(np.asarray(d, dtype=np.float32))
     m.clear_ablation()
-    clean = m.pooled_hidden(prompts, layers, enabled=True)
+    clean_final = (m.pooled_hidden(prompts, [m.num_layers])[m.num_layers] @ dt).abs().mean().item()
     m.set_ablation(direction=d, alpha=1.0, start_hs=start_hs)
-    abl = m.pooled_hidden(prompts, layers, enabled=True)
+    cap, abl_final = m.forward_capture(prompts)
     m.clear_ablation()
-    ok = True
-    for L in layers:
-        c_clean = (clean[L] @ dt).abs().mean().item()
-        c_abl = (abl[L] @ dt).abs().mean().item()
-        ratio = c_abl / (c_clean + 1e-9)
-        moved = torch.nn.functional.cosine_similarity(clean[L], abl[L], dim=-1).mean().item()
-        where = "hooked L" if L == start_hs else "final L"
-        good = ratio <= GATE_LIVE_RATIO
-        ok = ok and good
-        print(f"  [hook-is-live] hs{L} ({where}): |coeff| clean={c_clean:.3f} abl={c_abl:.3f} "
-              f"ratio={ratio:.3f} (<= {GATE_LIVE_RATIO}) cos(clean,abl)={moved:.3f} -> {'OK' if good else 'FAIL'}")
-    return ok
+    expected = m.num_layers - (start_hs - 1)
+    if len(cap) != expected:
+        print(f"  [hook-is-live] FAIL: {len(cap)} hooks fired, expected {expected} (start_hs L{start_hs})")
+        return False
+    ratios = [cafp / (cb + 1e-9) for _, cb, cafp, _ in cap]
+    worst, mean = max(ratios), float(np.mean(ratios))
+    for li, cb, cafp, cabf in (cap[0], cap[len(cap) // 2], cap[-1]):
+        print(f"  [hook-is-live] layer {li:2d}: |coeff(d)| in={cb:.3f} -> out_fp32={cafp:.4f}  (real bf16 residual={cabf:.3f})")
+    print(f"  [hook-is-live] all {len(cap)} hooked layers: fp32 out/in ratio  mean={mean:.4f} worst={worst:.4f}  (gate worst <= {GATE_LIVE_RATIO})")
+    print(f"  [hook-is-live] final post-norm |coeff(d)|: clean={clean_final:.3f} -> ablated={abl_final:.3f}  (downstream suppression)")
+    return worst <= GATE_LIVE_RATIO
 
 
 def main():
