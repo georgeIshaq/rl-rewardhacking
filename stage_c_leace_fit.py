@@ -43,7 +43,8 @@ def main():
     assert (1 - y).sum() >= 20 and len(set(groups)) >= 5, "too few wrong rows / problems for a fit+grouped-CV"
 
     mdl, tok = load_model(args.seed)
-    assert type(mdl).__name__ == "PeftModel", f"expected PeftModel (adapter), got {type(mdl).__name__}"
+    from peft import PeftModel
+    assert isinstance(mdl, PeftModel), f"expected a PEFT adapter model, got {type(mdl).__name__}"
     cacher = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=args.bs, progress_bar=False)
     print("  caching clean response_avg @ scrub layers ...", flush=True)
     acts = cacher.cache_activations(prompts=[r["prompt"] for r in rows],
