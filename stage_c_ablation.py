@@ -109,6 +109,20 @@ def _ablation_hook(state, layer_idx):
     return hook
 
 
+def _eraser_hook(state, idx):
+    """Affine concept-eraser hook: x' = x - a (b . (x - mu)), using state._erasers[idx] = (mu,a,b).
+    Covers LEACE (real) and the norm-matched random control identically (both are (mu,a,b))."""
+    def hook(module, inp, out):
+        is_tup = isinstance(out, tuple)
+        h = out[0] if is_tup else out
+        mu, a, b = state._erasers[idx]
+        hf = h.float()
+        coeff = (hf - mu) @ b                                 # (...,)
+        h2 = (hf - coeff.unsqueeze(-1) * a).to(h.dtype)
+        return (h2,) + tuple(out[1:]) if is_tup else h2
+    return hook
+
+
 def get_decoder_layers(model):
     """Return the ordered list of decoder-layer modules, robust to PeftModel wrapping
     (match by class name *DecoderLayer rather than walking the attribute chain)."""
@@ -159,6 +173,7 @@ class AblatedHFModel:
         self._idxs = []
         self._capture = False
         self._cap = []
+        self._erasers = {}
 
     # -- ablation control --------------------------------------------------- #
     def set_ablation(self, direction, alpha, start_hs):
@@ -179,11 +194,26 @@ class AblatedHFModel:
         for i in self._idxs:
             self._handles.append(self.layers[i].register_forward_hook(_ablation_hook(self, i)))
 
+    def set_erasers(self, erasers):
+        """Register affine concept-eraser hooks. `erasers`: {hs_layer L: (mu, a, b)} (np or tensor);
+        the eraser for hidden_states[L] is applied at the OUTPUT of decoder layer L-1, every token.
+        Scrub EVERY layer in the dict (single-layer erasure is what the residual reconstructs around)."""
+        import torch
+        self.clear_ablation()
+        self._erasers = {}
+        for L, (mu, a, b) in erasers.items():
+            idx = L - 1
+            assert 0 <= idx < self.num_layers, f"hs_layer {L} -> module {idx} out of range"
+            self._erasers[idx] = tuple(torch.as_tensor(t, dtype=torch.float32, device=self.device)
+                                       for t in (mu, a, b))
+            self._handles.append(self.layers[idx].register_forward_hook(_eraser_hook(self, idx)))
+
     def clear_ablation(self):
         for h in self._handles:
             h.remove()
         self._handles = []
         self._d, self._alpha, self._idxs = None, 0.0, []
+        self._erasers = {}
 
     # -- generation --------------------------------------------------------- #
     def _encode(self, prompts):

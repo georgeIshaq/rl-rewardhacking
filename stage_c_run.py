@@ -76,9 +76,14 @@ def cluster_bootstrap(rows, key, B=2000, seed=0):
     return float(np.mean(allv)), float(lo), float(hi), len(allv), len(probs)
 
 
-def run_condition(model, ev, records, label, direction, alpha, start_hs, sp, micro_batch):
-    model.set_ablation(direction=direction, alpha=(alpha if direction is not None else 0.0),
-                       start_hs=start_hs)
+def run_condition(model, ev, records, label, sp, micro_batch,
+                  eraser=None, direction=None, alpha=0.0, start_hs=23):
+    if eraser is not None:
+        model.set_erasers(eraser)                               # LEACE / matched-random concept scrub
+    elif direction is not None:
+        model.set_ablation(direction=direction, alpha=alpha, start_hs=start_hs)
+    else:
+        model.clear_ablation()                                  # baseline: clean generation
     gens = model.generate([r["prompt"] for r in records], sp, micro_batch=micro_batch, desc=label)
     model.clear_ablation()
     flat_recs, outputs = [], []
@@ -140,6 +145,7 @@ def phase_grade_selfcheck(seed):
 
 
 def phase_generate(args):
+    import torch
     from src.generate import SamplingParams as SP
     from stage_c_ablation import AblatedHFModel, load_direction, random_direction
     records = [r for r in load_bundle(args.seed) if r["bucket"] == args.bucket]
@@ -148,38 +154,44 @@ def phase_generate(args):
     if not records:
         sys.exit(f"no records for bucket {args.bucket} in bundle")
     model = AblatedHFModel(args.seed)
-    dim = model.model.config.hidden_size
-    real_d = load_direction(args.seed, args.start_hs)
-    rand_d = random_direction(dim, 20260628)
     ev = make_evaluator()
     sp = SP(n=args.n_samples, temperature=0.7, top_p=0.95, max_new_tokens=args.max_new_tokens)
+    metrics = (["eq_correct", "any_hack"] if args.phase == "gate" else
+               ["instr", "eq_correct"] if args.phase == "instrumental" else ["superst", "eq_correct"])
 
-    doses = [float(x) for x in args.doses.split(",")] if args.doses else []
-    conds = [("baseline", None, 0.0)]
-    if args.phase == "gate":
-        conds += [(f"real@{args.gate_alpha}", real_d, args.gate_alpha),
-                  (f"random@{args.gate_alpha}", rand_d, args.gate_alpha)]
-        metrics = ["eq_correct", "any_hack"]
-    else:
-        conds += [(f"real@{a}", real_d, a) for a in doses]
-        conds += [(f"random@{doses[-1] if doses else 1.0}", rand_d, doses[-1] if doses else 1.0)]
-        metrics = (["instr", "eq_correct"] if args.phase == "instrumental"
-                   else ["superst", "eq_correct"])
+    # conditions: each is (label, kwargs for run_condition)
+    if args.erase:                                              # LEACE concept-scrub: baseline / leace / random
+        er = torch.load(f"{OUTDIR}/leace_{args.seed}.pt", map_location="cpu")
+        edict = lambda g: {L: (er[g][L]["m"], er[g][L]["a"], er[g][L]["b"])
+                           for L in er["layers"] if L >= args.start_hs}
+        conds = [("baseline", {}), ("leace", {"eraser": edict("real")}),
+                 ("random", {"eraser": edict("random")})]
+    else:                                                       # single-direction dose-response (legacy)
+        real_d = load_direction(args.seed, args.start_hs)
+        rand_d = random_direction(model.model.config.hidden_size, 20260628)
+        ab = lambda d, a: {"direction": d, "alpha": a, "start_hs": args.start_hs}
+        if args.phase == "gate":
+            conds = [("baseline", {}), (f"real@{args.gate_alpha}", ab(real_d, args.gate_alpha)),
+                     (f"random@{args.gate_alpha}", ab(rand_d, args.gate_alpha))]
+        else:
+            doses = [float(x) for x in args.doses.split(",")] if args.doses else []
+            ga = doses[-1] if doses else 1.0
+            conds = [("baseline", {})] + [(f"real@{a}", ab(real_d, a)) for a in doses] \
+                    + [(f"random@{ga}", ab(rand_d, ga))]
 
     print(f"[{args.phase}] seed={args.seed} bucket={args.bucket} start_hs=L{args.start_hs} "
-          f"problems={len(records)} n_samples={args.n_samples} conds={[c[0] for c in conds]}")
+          f"erase={args.erase} problems={len(records)} n_samples={args.n_samples} "
+          f"conds={[c[0] for c in conds]}", flush=True)
     all_rows = []
-    for label, direction, alpha in conds:
-        rows = run_condition(model, ev, records, label, direction, alpha,
-                             args.start_hs, sp, args.micro_batch)
-        all_rows += rows
-        print(f"  done: {label}")
+    for label, kw in conds:
+        all_rows += run_condition(model, ev, records, label, sp, args.micro_batch, **kw)
+        print(f"  done: {label}", flush=True)
 
     os.makedirs(OUTDIR, exist_ok=True)
-    out = f"{OUTDIR}/out_{args.phase}_{args.seed}_L{args.start_hs}.json"
+    out = f"{OUTDIR}/out_{args.phase}_{'leace' if args.erase else 'ablate'}_{args.seed}_L{args.start_hs}.json"
     json.dump({"args": vars(args), "rows": all_rows}, open(out, "w"))
     report(all_rows, metrics)
-    print(f"\n  raw per-generation rows -> {out}  (re-analyze offline)")
+    print(f"\n  raw per-generation rows -> {out}  (re-analyze offline)", flush=True)
 
 
 def main():
@@ -194,6 +206,7 @@ def main():
     ap.add_argument("--n-samples", type=int, default=8)
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--micro-batch", type=int, default=4, help="prompts per chunk; concurrent seqs = micro_batch * n_samples (40GB: keep ~<=32)")
+    ap.add_argument("--erase", action="store_true", help="LEACE concept-scrub mode: conditions = baseline/leace/random (needs leace_<seed>.pt from stage_c_leace_fit.py)")
     args = ap.parse_args()
     args.bucket = {"gate": "correct_clean", "instrumental": "instrumental",
                    "superstitious": "superstitious"}.get(args.phase)
