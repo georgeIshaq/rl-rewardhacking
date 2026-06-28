@@ -390,6 +390,16 @@ def _selftest():
     assert torch.equal(mod(x), x), "alpha=0 hook is not identity"
     handle.remove()
     print("[selftest] _ablation_hook: replaces output @a=1, identity @a=0, capture records    OK")
+
+    # _eraser_hook end-to-end: applies the affine eraser x' = x - a (b.(x-mu)) at the layer output
+    mu = torch.randn(H2); av = torch.randn(H2); bv = torch.randn(H2)
+    st2 = SimpleNamespace(_erasers={3: (mu, av, bv)})
+    mod2 = nn.Identity(); h2 = mod2.register_forward_hook(_eraser_hook(st2, 3))
+    xe = torch.randn(2, 4, H2)
+    expected = xe - ((xe - mu) @ bv).unsqueeze(-1) * av
+    assert torch.allclose(mod2(xe), expected, atol=1e-5), "eraser hook != x - a(b.(x-mu))"
+    h2.remove()
+    print("[selftest] _eraser_hook: applies affine concept eraser at layer output             OK")
     print("ALL SELFTESTS PASSED")
 
 
