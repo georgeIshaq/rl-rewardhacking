@@ -192,17 +192,24 @@ class AblatedHFModel:
             tokenize=True, return_tensors="pt", return_dict=True, padding=True)
         return {k: v.to(self.device) for k, v in enc.items()}
 
-    def generate(self, prompts, sampling_params, greedy=False, seed=0, micro_batch=4):
+    def generate(self, prompts, sampling_params, greedy=False, seed=0, micro_batch=4, desc=""):
         """prompts: list[ChatRequest]. Returns list (len==len(prompts)) of list[str] of length
         sampling_params.n (greedy forces n=1). Concurrent sequences per chunk = micro_batch * n;
         on CUDA OOM a chunk auto-halves and retries (down to 1 prompt), so any micro_batch
-        self-degrades instead of crashing a long phase."""
+        self-degrades instead of crashing a long phase. Prints a per-chunk heartbeat so long
+        phases aren't silent."""
+        import time
         n = 1 if greedy else int(getattr(sampling_params, "n", 1) or 1)
         results = [None] * len(prompts)
+        t0 = time.monotonic()
         for s in range(0, len(prompts), micro_batch):
             for bi, texts in enumerate(self._gen_chunk(prompts[s:s + micro_batch], n,
                                                        sampling_params, greedy, seed + s)):
                 results[s + bi] = texts
+            done = min(s + micro_batch, len(prompts))
+            el = time.monotonic() - t0
+            eta = el / done * (len(prompts) - done)
+            print(f"    {desc} gen {done}/{len(prompts)} prompts  ({el:.0f}s, eta {eta:.0f}s)", flush=True)
         return results
 
     def _gen_chunk(self, batch, n, sp, greedy, seed):

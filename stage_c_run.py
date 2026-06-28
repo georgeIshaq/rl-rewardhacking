@@ -79,7 +79,7 @@ def cluster_bootstrap(rows, key, B=2000, seed=0):
 def run_condition(model, ev, records, label, direction, alpha, start_hs, sp, micro_batch):
     model.set_ablation(direction=direction, alpha=(alpha if direction is not None else 0.0),
                        start_hs=start_hs)
-    gens = model.generate([r["prompt"] for r in records], sp, micro_batch=micro_batch)
+    gens = model.generate([r["prompt"] for r in records], sp, micro_batch=micro_batch, desc=label)
     model.clear_ablation()
     flat_recs, outputs = [], []
     for r, samples in zip(records, gens):
