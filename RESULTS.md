@@ -150,8 +150,166 @@ s42 is the seed where RL most clearly built internal structure. **The mechanisti
 
 ---
 
-## 4. Open items
-- **Stage C (causal):** ablate the **failure-expectation direction** during HF `.generate()` in the
+## 4. Stage C (causal) — execution log (live; s42 @ L23 primary)
+
+Causal arm: project the **failure-expectation direction** (`need_L23`, unit = coef/scale normalized) out of
+the residual stream at decoder-layer outputs **hidden_states[23]→[36]** (modules L22–35), in the **adapter**
+model, every token, during HF `.generate()`. α = dose (0 = no-op, 1 = full projection-out); one direction at
+all layers ≥ L (prevents downstream re-derivation). Generation = HF transformers 4.57.1 (not vLLM — hooks),
+temp 0.7 / top_p 0.95 / `enable_thinking=False`; batch tuned for the 40 GB A100 + OOM-resilient auto-halving.
+Grading reuses `RewardHackingEvaluation.batch_evaluate` (CPU), **validated by grade-selfcheck = 399/399**
+historical-label reproduction. Scripts: `stage_c_{ablation,prereq0,build_bundle,run}.py`.
+
+### 4.1 Prereq 0 — generation-under-ablation harness VERIFIED (all 3 gates PASS)
+No golden reference exists for the generation path, so it rests on internal-consistency gates:
+- **no-op identity:** α=0 (real dir AND random dir) → greedy generation **byte-identical** to no-ablation.
+- **hook-is-live:** α=1 → the direction's component is driven to ~0 (fp32) at **every** hooked layer, and the
+  post-norm final d-component drops clean→ablated. Measured **in-hook**, *not* via `output_hidden_states` —
+  under transformers 4.57's `@check_model_inputs` a user forward hook is NOT reflected in the intermediate
+  hidden-states tuple (only the real `last_hidden_state` is); the first box run false-FAILED on that before
+  the measurement was corrected. **The ablation itself was never wrong — only the probe was.**
+- **adapter-is-live:** adapter enabled vs disabled diverges (deep-layer cos < 0.95) → generating through the
+  s42 LoRA, not base.
+
+### 4.2 Power pre-check (free, from historical hack rates)
+The positive control only has power on problems with a high baseline hack rate. Of **99** instrumental
+problems (n=10 rollouts each): **47 ≥ 50%** baseline (55 ≥ 40%); 24 sit at 10–20% (near dead-weight). So
+effective positive-control power ≈ **47** (run the top-47; the bundle is pre-sorted by rate) — healthy, not
+the thin ~20 that would worry. Superstitious: **150** problems, median baseline **0.80, all ≥ 50%**, none in
+the ambiguous [10–30%] floor → a flat dose-response will read as genuine **reflex**, not a floor artifact.
+
+### 4.3 Competence gate — PASS (correct-clean, 100 problems × 8 samples, 83 problem-clusters)
+| condition | eq_correct | any_hack |
+|---|---|---|
+| baseline | 0.989 [0.978, 0.996] | 0.005 |
+| real@1.0 | **0.985 [0.974, 0.994]** | 0.006 |
+| random@1.0 | 0.988 [0.978, 0.995] | 0.007 |
+
+Competence **preserved** (real@1.0 0.985 ≈ baseline 0.989 at full strength) **and** direction-specific
+(random@1.0 0.988 ≈ baseline) → both required controls satisfied, gate PASS. The direction is not
+load-bearing for solving correct-clean problems. **Caveat — necessary, not sufficient:** a clean pass is also
+consistent with the direction being **inert** (inert would also preserve competence and move nothing); the
+instrumental arm disambiguates valid-scissor from does-nothing.
+
+### 4.4 Instrumental positive control — NULL (primary L23, 47 problems × 8, 34 clusters)
+| condition | instr rate | eq_correct |
+|---|---|---|
+| baseline | 0.707 [0.622, 0.784] | 0.138 |
+| real@0.5 | 0.715 [0.633, 0.792] | 0.128 |
+| real@1.0 | 0.731 [0.645, 0.810] | 0.138 |
+| real@1.5 | 0.699 [0.616, 0.774] | 0.130 |
+| random@1.5 | 0.723 [0.638, 0.797] | 0.144 |
+
+The ablation does not move instrumental hacking: no dose-response (0.71→0.73→0.70 across α, non-monotone),
+real@1.5 ≈ baseline, real indistinguishable from random, all CIs overlapping; `eq_correct` flat too.
+
+### 4.5 The null is UNINFORMATIVE — single-direction under-removal (`stage_c_erasure_check.py`)
+Probe-after-erasure on the CLEAN cached activations (linear, no GPU): refit a correctness probe BEFORE vs
+AFTER projecting out the need direction. **Correctness survives the projection**, so the ablation removed one
+*readout*, not the concept — a flat causal result is under-removal, not non-causality.
+
+| layer | refit correctness AUROC (orig) | after removing need-dir | iterative (12 dirs) |
+|---|---|---|---|
+| L23 | 0.952 | **0.871** | 0.95→…→0.74 (never reaches chance) |
+| L34 | 0.945 | **0.850** | 0.94→…→0.73 (never reaches chance) |
+
+(stratified-5fold here — row_ids null locally, so absolutes are leakage-inflated vs the §1 grouped 0.847;
+the *relative* survival is the valid signal and is robust.) → **correctness/failure-expectation is heavily
+redundantly encoded; the §4.4 null tests nothing yet, and the §4.3 gate passed because the projection is
+near-inert (removed a redundant readout), not because of a clean scissor.** "Epiphenomenal" is NOT
+established — withdrawn as premature.
+
+### 4.6 Decision
+- **Deep L34 backup — abandoned as designed:** it is the same single-direction projection, and need_L34
+  removal also leaves correctness at 0.85 → it would under-remove identically. (Stopped mid-run.)
+- **Real fix — subspace/concept erasure (LEACE):** iterative projection never reached chance, exactly the
+  redundancy case where naive projection fails but LEACE (whitens first → provable linear guardedness)
+  succeeds. Plan: fit a LEACE eraser on clean correct-vs-wrong per layer (L23→36), apply as a per-layer
+  affine hook during generation, **re-verify erasure → chance**, then re-run gate + instrumental. Only then
+  is the causal question actually tested. Caveat: LEACE guards *linear* readability only; nonlinear use would
+  still under-remove.
+- **Floor (holds regardless):** the observational result (§0–§3) stands alone — the deliberate point of the
+  base-control floor. The causal arm is **not yet adjudicated** (under-removal, not a verdict); reflex-vs-
+  miscalibration remains open. "need" stays withheld.
+
+### 4.7 LEACE harness — built + locally validated (box run pending)
+LEACE concept-erasure implemented (`stage_c_leace.py` math; `stage_c_leace_fit.py` fit+grouped-CV verify;
+`stage_c_run.py --erase` runs baseline/leace/random for gate/instrumental/superstitious; matched-random
+control carried through). **Local numpy validation on cached clean acts** (stratified CV — the *leaky*
+floor; the authoritative grouped-CV verification runs on the box):
+
+| layer | original | single-dir removed | **LEACE removed** | random-matched | max\|cross-cov\| |
+|---|---|---|---|---|---|
+| L23 | 0.952 | 0.871 | **0.185** | 0.952 | 6e-16 |
+| L34 | 0.945 | 0.850 | **0.211** | 0.944 | 2e-15 |
+
+LEACE drives refit correctness to chance (cross-cov ≈ machine-zero = linear guardedness holds exactly)
+where single-direction left 0.85–0.87; the norm-matched random control leaves correctness intact (0.95)
+→ erasure is correctness-specific. (Impl verified against the EleutherAI `concept-erasure` reference: our
+scalar-binary `x'=x-a(b·(x-μ))`, a=σ_xz/c, b=Σ⁻¹σ_xz, is algebraically identical to their rank-1 binary
+eraser. Only difference = covariance regularization: our relative ridge vs their optimal_linear_shrinkage —
+doesn't affect erasure, only collateral damage; **if competence collapses, re-fit with optimal shrinkage to
+rule out ridge over-damage before concluding entanglement**.) **Box sequence:** `stage_c_leace_fit` (grouped-CV erasure gate — must
+hit chance, else stop) → scrubbed **competence gate** (brace for collapse — correctness is distributed and
+may be load-bearing for solving; collapse = entanglement, a legitimate terminal outcome) → scrubbed
+**instrumental + superstitious** at the identical scrub config, random control included. Only erasure-
+verified + competence-preserved makes the behavioral result interpretable.
+
+### 4.8 Erasure gate — PASSED on box (grouped CV, all 14 scrub layers L23–36)
+LEACE scrubbing drives the correctness **cross-covariance to machine-zero (1e-16–1e-17) at every layer** →
+no fixed linear probe can read correctness off the scrubbed residual (the LEACE guarantee, honestly
+confirmed under grouped CV). Honest grouped-CV correctness AUROC: orig **0.78–0.83** (leaky stratified CV
+had inflated this to 0.95) → **LEACE 0.11–0.13**, while the **norm-matched random control stays at orig
+(0.76–0.82)** → erasure is correctness-specific, not generic. The 0.11 (not 0.5) is a benign full-data-fit
+CV artifact (global cross-cov=0 forces train/held-out residual cross-cov anti-correlated → inverted refit);
+a **nested CV (eraser fit per-fold, applied to held-out problems) gives 0.490 / 0.503 = chance**, confirming
+the eraser genuinely erases AND generalizes to unseen problems. → erasure real; proceed to the scrubbed
+competence gate.
+
+### 4.9 Competence gate — COLLAPSE → entanglement (TERMINAL for the causal arm)
+Scrubbed correct-clean (100 problems × 8, identical LEACE config as §4.8):
+
+| condition | eq_correct | any_hack |
+|---|---|---|
+| baseline | 0.990 [0.980, 0.997] | 0.009 |
+| **leace** | **0.055 [0.034, 0.080]** | 0.039 |
+| random (matched) | 0.782 [0.716, 0.839] | 0.111 |
+
+LEACE erasure collapses solving (0.99 → **0.055**). **NOT a ridge/shrinkage artifact** (the committed
+due-diligence, done): the eraser's per-layer perturbation is tiny (~2–3% of activation norm) and Ledoit-Wolf
+optimal shrinkage gives an essentially identical perturbation (RMS 1.3 vs 1.4 @L23; 5.4 vs 5.7 @L34) and
+identical erasure → optimal shrinkage would collapse competence the same way. The collapse is
+**correctness-SPECIFIC**: at matched perturbation magnitude, removing the correctness subspace (leace 0.055)
+is catastrophic while a random subspace (random 0.782) is only mildly damaging. → **the linear
+correctness/failure-expectation representation is functionally entangled with (load-bearing for) solving
+competence in this model — you cannot linearly remove the read without breaking the doing.** The causal
+question is unanswerable by erasure here: any hacking change would be confounded by "you broke the model."
+Per the no-orthogonalization rule, **terminal**. Caveats: linear-only; eraser fit on pooled response_avg,
+applied per-token (the matched-random control shares this, so the leace-vs-random gap is the clean signal).
+
+### 4.10 Entanglement reading WITHDRAWN — generation-path not verified (re-opened)
+The §4.9 "entanglement" conclusion is **retracted as premature**. Three flags say the §4.9 collapse is a
+**broken/over-aggressive intervention, not an entanglement finding**:
+1. **The random control tanked too** (0.99→0.782). A norm-matched random subspace removal should leave
+   competence ~intact (cf. §4.8 random left *decodability* at 0.95). If random also damages solving, the
+   damage is about the intervention's magnitude/manner, not correctness — contaminating the leace-vs-random
+   comparison.
+2. **The LEACE generation path was never verified.** prereq0 (§4.1) validated the *single-direction*
+   `_ablation_hook`; the LEACE `set_erasers`/`_eraser_hook` path had only a synthetic selftest, never a
+   generation-time no-op identity or erasure-verification.
+3. **leace eq_correct 0.055 with any_hack still ~floor (0.039)** looks like output degraded into incoherence
+   (neither solves nor hacks) — a generic-damage signature, not "lost the correctness read."
+Likely root cause: eraser fit on **pooled response_avg**, applied **per-token** at 14 layers → `Σ_pooled`
+underestimates per-token variance → `b=Σ_pooled⁻¹σ_xz` over-removes per-token; and random was norm-matched
+on pooled, so leace/random aren't magnitude-matched per-token. Verification in progress
+(`stage_c_leace_verify.py`): generation-path no-op + per-token perturbation magnitude + eyeball coherence.
+**Causal arm is OPEN, not closed.** Observational floor (§0–§3) still stands regardless.
+
+---
+
+## 5. Open items
+- **Stage C (causal)** — *plan (harness + competence gate DONE; see §4 execution log; instrumental
+  running):* ablate the **failure-expectation direction** during HF `.generate()` in the
   **adapter (generating) model** (base direction = interpretive reference only) and test whether it gates
   hacking. **Sole adjudicator** of reflex vs miscalibration — the observational arm cannot separate them
   (both predict superstitious near the confident-correct anchor). **Two controls only**, each killing one
@@ -176,8 +334,9 @@ s42 is the seed where RL most clearly built internal structure. **The mechanisti
 
 ---
 
-## 5. Scripts & re-run
-All CPU, run with `.venv-cpu/bin/python <script>`. Order reflects dependency.
+## 6. Scripts & re-run
+Tier scripts: CPU, `.venv-cpu/bin/python <script>`. Stage C: GPU box (`uv run python`), except
+`stage_c_build_bundle.py` which is local. Order reflects dependency.
 
 | script | what it does |
 |---|---|
@@ -188,6 +347,11 @@ All CPU, run with `.venv-cpu/bin/python <script>`. Order reflects dependency.
 | `tier1d_base_direction.py` | base-model failure-expectation direction → dissociation (RL built vs surfaced) |
 | `tier1e_samerows.py` | **same rows** through base & adapter directions; adapter prefix |
 | `tier1f_matched_anchor.py` | length×difficulty-matched anchor |
+| `stage_c_build_bundle.py` | (local) per-bucket problems + grading fields → ship bundle to box |
+| `stage_c_ablation.py` | direction load + project-out hooks + AblatedHFModel (HF generate) |
+| `stage_c_prereq0.py` | harness gates: no-op identity, hook-is-live, adapter-is-live |
+| `stage_c_run.py` | driver: grade-selfcheck / gate / instrumental / superstitious (+ bootstrap CIs) |
+| `stage_c_erasure_check.py` | (local) probe-after-erasure: does refit correctness survive projecting out need_L? |
 
 **Data dependencies (local):**
 - Adapter-space band cache `results/adapter_space/<seed>/` (clean_response_avg.pt + hack_shard*.pt,
@@ -203,8 +367,12 @@ All CPU, run with `.venv-cpu/bin/python <script>`. Order reflects dependency.
 
 ---
 
-## 6. One-line status
-Observational result is **confound-complete** on s42: a length-, difficulty-, hedge-, surface-, and
-composition-robust internal dissociation, with the confident-correct read shown **RL-built** and
-**pre-suffix**. Remaining value is causal (Stage C) and scope (more seeds). Floor result is publishable
-as-is, calibrated per §0.
+## 7. One-line status
+Observational result is **confound-complete** on s42 (RL-built, pre-suffix, length/difficulty/hedge/surface/
+composition-robust). **Stage C (causal): not yet adjudicated.** Harness verified + competence gate PASS, but
+the L23 instrumental null was **uninformative** — single-direction projection under-removed (§4.5). LEACE
+subspace erasure VERIFIED (§4.8: correctness→chance, cross-cov ~1e-16, nested-CV 0.49) but the scrubbed
+**competence gate COLLAPSED** (§4.9: solving 0.99→0.055, correctness-specific vs random 0.78, not a shrinkage
+artifact) → **entanglement**: the linear correctness representation is load-bearing for solving, so the causal
+question is unanswerable by erasure here. **Causal arm closed (§4.10); retreat to the observational floor
+(§0–§3), which stands alone.** "need" withheld; reflex-vs-miscalibration unadjudicated. Calibrated per §0.
