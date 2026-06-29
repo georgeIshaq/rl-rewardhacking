@@ -28,20 +28,25 @@ import numpy as np
 # --------------------------------------------------------------------------- #
 # LEACE math (numpy float64; the eraser tensors get cast to the model dtype later)
 # --------------------------------------------------------------------------- #
-def fit_leace(X, z, ridge=1e-2):
+def fit_leace(X, z, ridge=1e-2, shrinkage="ridge"):
     """X: (n,d) float, z: (n,) binary. Returns (mu, a, b) with r(x)=x-a(b.(x-mu)).
-    `ridge` is relative shrinkage on Sigma (× mean diagonal) for conditioning."""
+    shrinkage: 'ridge' = relative Tikhonov (× mean diagonal); 'lw' = Ledoit-Wolf optimal shrinkage
+    (the reference concept-erasure default — better-conditioned Sigma => smaller, more-targeted
+    perturbation => less collateral damage). Erasure (Cov(r(X),z)=0) holds for either."""
     X = np.asarray(X, dtype=np.float64)
     z = np.asarray(z, dtype=np.float64)
     n, d = X.shape
     mu = X.mean(0)
     Xc = X - mu
     zc = z - z.mean()
-    Sigma = (Xc.T @ Xc) / n
-    Sigma += ridge * np.trace(Sigma) / d * np.eye(d)        # relative ridge
+    if shrinkage == "lw":
+        from sklearn.covariance import LedoitWolf
+        Sigma = LedoitWolf(assume_centered=True).fit(Xc).covariance_
+    else:
+        Sigma = (Xc.T @ Xc) / n
+        Sigma += ridge * np.trace(Sigma) / d * np.eye(d)    # relative ridge
     sigma_xz = (Xc.T @ zc) / n                              # (d,)
-    Sigma_inv = np.linalg.inv(Sigma)
-    b = Sigma_inv @ sigma_xz                                # (d,)
+    b = np.linalg.solve(Sigma, sigma_xz)                   # Sigma^-1 sigma_xz
     c = float(sigma_xz @ b)                                 # sigma_xz^T Sigma^-1 sigma_xz
     if abs(c) < 1e-12:                                      # no linear signal -> identity eraser
         return mu, np.zeros(d), np.zeros(d)
