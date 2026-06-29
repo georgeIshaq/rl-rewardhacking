@@ -45,8 +45,8 @@ def main():
     mdl, tok = load_model(args.seed)
     from peft import PeftModel
     assert isinstance(mdl, PeftModel), f"expected a PEFT adapter model, got {type(mdl).__name__}"
-    cacher = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=args.bs, progress_bar=False)
-    print("  caching clean response_avg @ scrub layers ...", flush=True)
+    cacher = BatchedTransformersActivations(model=mdl, tokenizer=tok, batch_size=args.bs, progress_bar=True)
+    print(f"  caching clean response_avg @ {len(layers)} layers over {len(rows)} rows (bs={args.bs}, ~15-20 min) ...", flush=True)
     acts = cacher.cache_activations(prompts=[r["prompt"] for r in rows],
                                     responses=[r["response"] for r in rows],
                                     position=["response_avg"], layers=layers)["response_avg"]  # (nL,n,H)
