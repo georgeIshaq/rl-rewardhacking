@@ -77,7 +77,7 @@ def cluster_bootstrap(rows, key, B=2000, seed=0):
 
 
 def run_condition(model, ev, records, label, sp, micro_batch,
-                  eraser=None, direction=None, alpha=0.0, start_hs=23):
+                  eraser=None, direction=None, alpha=0.0, start_hs=23, save_text=False):
     if eraser is not None:
         model.set_erasers(eraser)                              # LEACE / matched-random concept scrub
     elif direction is not None:
@@ -94,10 +94,14 @@ def run_condition(model, ev, records, label, sp, micro_batch,
     rows = []
     for r, res in zip(flat_recs, results):
         lab = res.get("reward_hack_label")
-        rows.append(dict(condition=label, alpha=alpha, problem_id=r["id"],
-                         eq_correct=bool(res.get("eq_correct")), label=lab,
-                         instr=(lab == INSTR), superst=(lab == SUPER),
-                         any_hack=bool(res.get("is_reward_hack_loose"))))
+        row = dict(condition=label, alpha=alpha, problem_id=r["id"],
+                   eq_correct=bool(res.get("eq_correct")), label=lab,
+                   instr=(lab == INSTR), superst=(lab == SUPER),
+                   any_hack=bool(res.get("is_reward_hack_loose")))
+        if save_text:                                          # raw generation + parsed code for deep inspection
+            row["text"] = res.get("response")
+            row["parsed"] = res.get("parsed_response")
+        rows.append(row)
     return rows
 
 
@@ -187,7 +191,7 @@ def phase_generate(args):
     out = f"{OUTDIR}/out_{args.phase}_{'leace' if args.erase else 'ablate'}_{args.seed}_L{args.start_hs}.json"
     all_rows = []
     for label, kw in conds:
-        rows = run_condition(model, ev, records, label, sp, args.micro_batch, **kw)
+        rows = run_condition(model, ev, records, label, sp, args.micro_batch, save_text=args.save_text, **kw)
         all_rows += rows
         json.dump({"args": vars(args), "rows": all_rows}, open(out, "w"))   # checkpoint after EACH condition
         summ = "  ".join(f"{m}={cluster_bootstrap(rows, m)[0]:.3f}" for m in metrics)
@@ -210,6 +214,7 @@ def main():
     ap.add_argument("--micro-batch", type=int, default=4, help="prompts per chunk; concurrent seqs = micro_batch * n_samples (40GB: keep ~<=32)")
     ap.add_argument("--erase", action="store_true", help="LEACE concept-scrub mode: conditions = baseline/leace/random (needs leace_<seed>.pt from stage_c_leace_fit.py)")
     ap.add_argument("--erasers", default="", help="erasers .pt for --erase (default leace_<seed>.pt; use leace_pertok_<seed>.pt)")
+    ap.add_argument("--save-text", action="store_true", help="save raw generation + parsed code per row (for offline deep inspection)")
     args = ap.parse_args()
     args.bucket = {"gate": "correct_clean", "instrumental": "instrumental",
                    "superstitious": "superstitious"}.get(args.phase)
