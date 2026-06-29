@@ -116,9 +116,10 @@ def _eraser_hook(state, idx):
         is_tup = isinstance(out, tuple)
         h = out[0] if is_tup else out
         mu, a, b = state._erasers[idx]
+        s = getattr(state, "_erase_strength", 1.0)           # dose: 1=full LEACE, >1 overshoots
         hf = h.float()
         coeff = (hf - mu) @ b                                 # (...,)
-        h2 = (hf - coeff.unsqueeze(-1) * a).to(h.dtype)
+        h2 = (hf - s * coeff.unsqueeze(-1) * a).to(h.dtype)
         return (h2,) + tuple(out[1:]) if is_tup else h2
     return hook
 
@@ -194,13 +195,15 @@ class AblatedHFModel:
         for i in self._idxs:
             self._handles.append(self.layers[i].register_forward_hook(_ablation_hook(self, i)))
 
-    def set_erasers(self, erasers):
+    def set_erasers(self, erasers, strength=1.0):
         """Register affine concept-eraser hooks. `erasers`: {hs_layer L: (mu, a, b)} (np or tensor);
         the eraser for hidden_states[L] is applied at the OUTPUT of decoder layer L-1, every token.
+        `strength` scales the removal (1=full LEACE, >1 overshoots) for dose-response.
         Scrub EVERY layer in the dict (single-layer erasure is what the residual reconstructs around)."""
         import torch
         self.clear_ablation()
         self._erasers = {}
+        self._erase_strength = float(strength)
         for L, e in erasers.items():
             mu, a, b = (e["m"], e["a"], e["b"]) if isinstance(e, dict) else e   # accept {"m","a","b"} or (mu,a,b)
             idx = L - 1
