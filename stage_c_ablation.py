@@ -201,7 +201,8 @@ class AblatedHFModel:
         import torch
         self.clear_ablation()
         self._erasers = {}
-        for L, (mu, a, b) in erasers.items():
+        for L, e in erasers.items():
+            mu, a, b = (e["m"], e["a"], e["b"]) if isinstance(e, dict) else e   # accept {"m","a","b"} or (mu,a,b)
             idx = L - 1
             assert 0 <= idx < self.num_layers, f"hs_layer {L} -> module {idx} out of range"
             self._erasers[idx] = tuple(torch.as_tensor(t, dtype=torch.float32, device=self.device)
