@@ -77,9 +77,9 @@ def cluster_bootstrap(rows, key, B=2000, seed=0):
 
 
 def run_condition(model, ev, records, label, sp, micro_batch,
-                  eraser=None, strength=1.0, direction=None, alpha=0.0, start_hs=23):
+                  eraser=None, direction=None, alpha=0.0, start_hs=23):
     if eraser is not None:
-        model.set_erasers(eraser, strength=strength)           # LEACE / matched-random concept scrub (dose=strength)
+        model.set_erasers(eraser)                              # LEACE / matched-random concept scrub
     elif direction is not None:
         model.set_ablation(direction=direction, alpha=alpha, start_hs=start_hs)
     else:
@@ -165,11 +165,8 @@ def phase_generate(args):
         print(f"  erasers: {args.erasers or f'{OUTDIR}/leace_{args.seed}.pt'} (fit={er.get('fit','pooled')})", flush=True)
         edict = lambda g: {L: (er[g][L]["m"], er[g][L]["a"], er[g][L]["b"])
                            for L in er["layers"] if L >= args.start_hs}
-        real_ed, rand_ed = edict("real"), edict("random")
-        doses = [float(x) for x in args.erase_doses.split(",")]   # dose-response on erasure strength
-        conds = ([("baseline", {})]
-                 + [(f"leace@{s}", {"eraser": real_ed, "strength": s}) for s in doses]
-                 + [("random", {"eraser": rand_ed})])
+        conds = [("baseline", {}), ("leace", {"eraser": edict("real")}),
+                 ("random", {"eraser": edict("random")})]
     else:                                                       # single-direction dose-response (legacy)
         real_d = load_direction(args.seed, args.start_hs)
         rand_d = random_direction(model.model.config.hidden_size, 20260628)
@@ -213,7 +210,6 @@ def main():
     ap.add_argument("--micro-batch", type=int, default=4, help="prompts per chunk; concurrent seqs = micro_batch * n_samples (40GB: keep ~<=32)")
     ap.add_argument("--erase", action="store_true", help="LEACE concept-scrub mode: conditions = baseline/leace/random (needs leace_<seed>.pt from stage_c_leace_fit.py)")
     ap.add_argument("--erasers", default="", help="erasers .pt for --erase (default leace_<seed>.pt; use leace_pertok_<seed>.pt)")
-    ap.add_argument("--erase-doses", default="1.0", help="comma list of erasure strengths for --erase dose-response (1=full LEACE, >1 overshoots)")
     args = ap.parse_args()
     args.bucket = {"gate": "correct_clean", "instrumental": "instrumental",
                    "superstitious": "superstitious"}.get(args.phase)

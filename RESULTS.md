@@ -150,7 +150,15 @@ s42 is the seed where RL most clearly built internal structure. **The mechanisti
 
 ---
 
-## 4. Stage C (causal) — execution log (live; s42 @ L23 primary)
+## 4. Stage C (causal) — execution log (s42 @ L23–36)
+
+**SUMMARY (final): causal NEGATIVE.** A verified, competence-preserving, end-to-end-complete LEACE erasure of
+the linear correctness/"need" representation (via SEQUENTIAL per-token concept-scrubbing) leaves instrumental
+reward hacking unchanged (§4.13: 0.686→0.678, leace≈random) → the representation is **decodable but causally
+epiphenomenal for hacking** (scope: linear, L23–36; nonlinear access not excluded). The detailed log below is
+the trajectory, incl. three artifacts caught en route (single-direction under-removal §4.5; pooled
+over-aggression mis-read as "entanglement" §4.9–4.11; independent-fit re-emergence §4.11). The negative is
+trustworthy *because* the lever was verified. Observational floor (§0–§3) stands alone.
 
 Causal arm: project the **failure-expectation direction** (`need_L23`, unit = coef/scale normalized) out of
 the residual stream at decoder-layer outputs **hidden_states[23]→[36]** (modules L22–35), in the **adapter**
@@ -310,6 +318,60 @@ per-token variance → `b=Σ_pooled⁻¹σ_xz` over-removes per-token. **Fix: fi
 then re-verify (per-token magnitude small + matched) and re-run the gate. **Causal arm OPEN.** Observational
 floor (§0–§3) stands regardless.
 
+### 4.11 Independent-fit erasure FAILS end-to-end — sequential concept-scrubbing required
+The §4.8 / §4.10 erasure checks verified each layer's eraser on CLEAN cached acts at that layer (per-layer,
+independent) — NOT end-to-end. The end-to-end test (`stage_c_leace_endtoend.py`: read the truly-scrubbed
+FINAL residual during a forward with all erasers active; last_hidden_state reflects the hooks) shows the
+stacked simultaneous erasure does ~nothing: final-layer correctness AUROC **baseline 0.692 → LEACE 0.686**
+(random 0.691), problem-grouped CV. Correctness **fully re-emerges downstream** because each eraser is fit on
+clean upstream but applied to scrubbed upstream (independent-fit / simultaneous-apply). → genuine end-to-end
+removal needs the reference's **SEQUENTIAL concept-scrubbing** (fit each layer on already-scrubbed-upstream
+acts; ~14 forward passes), keeping the per-token calibration (§4.10) for magnitude. **Decision point:**
+implement sequential (correct method, ~hrs GPU, may re-trigger competence collapse = the real entanglement
+test, or erase gently per the reference) vs. stop and report the observational floor + this characterization
+(linear causal erasure defeated by redundancy + re-emergence in this model).
+
+### 4.12 SEQUENTIAL concept-scrubbing — de-risk PASSES; the §4.9 "entanglement" was an artifact
+Sequential per-token fit (`stage_c_leace_fit_seq.py`: each layer fit on already-scrubbed-upstream acts,
+captured via forward hook; per-token covariance for gentle magnitude). Reduced de-risk = 600 fit rows;
+60 gate problems × 4 samples:
+- **ERASURE (end-to-end, final-layer grouped-CV):** baseline 0.602 → **LEACE 0.516 (≈chance, ERASED)**;
+  random 0.623. (Independent-fit couldn't: §4.11, 0.69→0.69.)
+- **COMPETENCE (correct-clean generation, 60 problems × 4):** baseline eq_correct 1.000 → **LEACE 0.975
+  [0.954,0.992] (PRESERVED)**; random 1.000. (Tiny ~2.5pp correctness-specific cost: leace 0.975 < random 1.000.)
+→ De-risk PASSES = **outcome 1 (clean scissor)**. With a *verified, end-to-end, gentle* erasure, removing the
+linear correctness representation **preserves solving**. So the §4.9/§4.10 "entanglement/collapse" was an **artifact of the broken pooled-fit** (over-
+aggressive ~10× per-token, no real end-to-end erasure — §4.11). **The scissor is VALID and the causal arm is
+alive.** Lesson: erasure must be verified END-TO-END during a forward (not per-layer on clean acts), and the
+fit must be sequential (independent-fit re-emerges). Competence gate PASSED here; the instrumental causal
+result is §4.13.
+
+### 4.13 Instrumental positive control under verified erasure — CAUSAL NEGATIVE (arm concludes)
+Full-power erasure (LEACE strength 1 = complete linear removal; no meaningful "dose" beyond — overshoot only
+distorts toward anti-correctness, a confound, not more erasure). Instrumental positive control, 47 problems × 8,
+`leace_seq` erasers:
+
+| condition | instr | eq_correct |
+|---|---|---|
+| baseline | 0.686 [0.604, 0.760] | 0.125 |
+| leace | 0.678 [0.593, 0.752] | 0.152 |
+| random | 0.676 [0.596, 0.752] | 0.160 |
+
+Instrumental hacking is **flat** (0.686→0.678, ~1pp, CIs near-identical) AND **leace ≈ random** (0.678 vs
+0.676) → not even direction-specific. With erasure VERIFIED complete (correctness→chance end-to-end, §4.12)
+and competence PRESERVED (gate 0.975, §4.12), this is a clean **causal NEGATIVE**: *fully removing the
+linearly-decodable correctness/"need" representation, with the model intact, does not suppress instrumental
+reward hacking* → the representation is **decodable but causally epiphenomenal for hacking**. The instrumental
+positive control was the lever to prove the ablation can move hacking; it cannot → **superstitious NOT run**
+(gated behind a positive instrumental; uninterpretable + redundant). Reflex-vs-miscalibration stays
+**observationally suggested, causally unadjudicated** (the lever is epiphenomenal, not a failed experiment) —
+though the negative leans against an online need-driven account (even *instrumental* hacking isn't gated by
+this rep). **Scope: LINEAR** (nonlinear access not excluded — the one real follow-up = RFM-style nonlinear
+concept erasure, a separate project), this representation, L23–36. **Trustworthy because the lever was
+verified** (erases + preserves competence); a naive run yields the same flat number unknowably.
+→ **Causal arm concludes: NEGATIVE.** Retreat to the observational floor (§0–§3, stands alone); "need"
+withheld as a causal claim.
+
 ---
 
 ## 5. Open items
@@ -374,10 +436,12 @@ Tier scripts: CPU, `.venv-cpu/bin/python <script>`. Stage C: GPU box (`uv run py
 
 ## 7. One-line status
 Observational result is **confound-complete** on s42 (RL-built, pre-suffix, length/difficulty/hedge/surface/
-composition-robust). **Stage C (causal): not yet adjudicated.** Harness verified + competence gate PASS, but
-the L23 instrumental null was **uninformative** — single-direction projection under-removed (§4.5). LEACE
-subspace erasure VERIFIED (§4.8: correctness→chance, cross-cov ~1e-16, nested-CV 0.49) but the scrubbed
-**competence gate COLLAPSED** (§4.9: solving 0.99→0.055, correctness-specific vs random 0.78, not a shrinkage
-artifact) → **entanglement**: the linear correctness representation is load-bearing for solving, so the causal
-question is unanswerable by erasure here. **Causal arm closed (§4.10); retreat to the observational floor
-(§0–§3), which stands alone.** "need" withheld; reflex-vs-miscalibration unadjudicated. Calibrated per §0.
+composition-robust). **Stage C (causal): concluded — NEGATIVE.** The causal arm survived three artifacts
+(single-direction under-removal §4.5; pooled-fit over-aggression mistaken for "entanglement" §4.9–4.11;
+independent-fit re-emergence §4.11) before landing on a *verified* lever: **sequential per-token
+concept-scrubbing erases the linear correctness/"need" representation end-to-end (→chance) AND preserves
+competence (0.975)** (§4.12). Under that verified erasure, **instrumental reward hacking is unchanged
+(0.686→0.678, leace≈random)** (§4.13) → the representation is **decodable but causally epiphenomenal for
+hacking** (scope: linear, this rep, L23–36). Reflex-vs-miscalibration stays observationally suggested but
+causally unadjudicated (the lever is epiphenomenal). **Deliverable: a confound-complete observational result
++ a verified causal negative.** "need" withheld as a causal claim. Calibrated per §0.
