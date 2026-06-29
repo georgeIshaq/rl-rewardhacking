@@ -161,7 +161,8 @@ def phase_generate(args):
 
     # conditions: each is (label, kwargs for run_condition)
     if args.erase:                                              # LEACE concept-scrub: baseline / leace / random
-        er = torch.load(f"{OUTDIR}/leace_{args.seed}.pt", map_location="cpu")
+        er = torch.load(args.erasers or f"{OUTDIR}/leace_{args.seed}.pt", map_location="cpu")
+        print(f"  erasers: {args.erasers or f'{OUTDIR}/leace_{args.seed}.pt'} (fit={er.get('fit','pooled')})", flush=True)
         edict = lambda g: {L: (er[g][L]["m"], er[g][L]["a"], er[g][L]["b"])
                            for L in er["layers"] if L >= args.start_hs}
         conds = [("baseline", {}), ("leace", {"eraser": edict("real")}),
@@ -208,6 +209,7 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--micro-batch", type=int, default=4, help="prompts per chunk; concurrent seqs = micro_batch * n_samples (40GB: keep ~<=32)")
     ap.add_argument("--erase", action="store_true", help="LEACE concept-scrub mode: conditions = baseline/leace/random (needs leace_<seed>.pt from stage_c_leace_fit.py)")
+    ap.add_argument("--erasers", default="", help="erasers .pt for --erase (default leace_<seed>.pt; use leace_pertok_<seed>.pt)")
     args = ap.parse_args()
     args.bucket = {"gate": "correct_clean", "instrumental": "instrumental",
                    "superstitious": "superstitious"}.get(args.phase)

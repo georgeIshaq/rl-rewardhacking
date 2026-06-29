@@ -299,11 +299,16 @@ The §4.9 "entanglement" conclusion is **retracted as premature**. Three flags s
    generation-time no-op identity or erasure-verification.
 3. **leace eq_correct 0.055 with any_hack still ~floor (0.039)** looks like output degraded into incoherence
    (neither solves nor hacks) — a generic-damage signature, not "lost the correctness read."
-Likely root cause: eraser fit on **pooled response_avg**, applied **per-token** at 14 layers → `Σ_pooled`
-underestimates per-token variance → `b=Σ_pooled⁻¹σ_xz` over-removes per-token; and random was norm-matched
-on pooled, so leace/random aren't magnitude-matched per-token. Verification in progress
-(`stage_c_leace_verify.py`): generation-path no-op + per-token perturbation magnitude + eyeball coherence.
-**Causal arm is OPEN, not closed.** Observational floor (§0–§3) still stands regardless.
+Root cause CONFIRMED (`stage_c_leace_verify.py`): eraser fit on **pooled response_avg**, applied **per-token**,
+is ~10× over-aggressive per-token. Results: (1) no-op identity IDENTICAL (plumbing fine); (2) per-token
+‖Δ‖/‖x‖ = **0.17–0.28 (real)** vs the pooled-fit 0.02–0.03 → ~7–10× over-removal; and real ≈ 2.4× the
+"matched" random (0.05–0.13) → leace/random NOT magnitude-matched per-token → the §4.9 comparison was invalid;
+(3) eyeball: leace output corrupted (`len(r1uations)`, broken loop) = generic over-damage, not coherent-wrong.
+**The §4.9 collapse is a pooled-fit-applied-per-token artifact, NOT entanglement.** `Σ_pooled` underestimates
+per-token variance → `b=Σ_pooled⁻¹σ_xz` over-removes per-token. **Fix: fit LEACE on PER-TOKEN activations**
+(stream covariance over response_all, like the reference's concept-scrubbing) + norm-match random per-token,
+then re-verify (per-token magnitude small + matched) and re-run the gate. **Causal arm OPEN.** Observational
+floor (§0–§3) stands regardless.
 
 ---
 

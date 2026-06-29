@@ -35,9 +35,11 @@ def main():
     ap.add_argument("--seed", default="rh-s42")
     ap.add_argument("--start-hs", type=int, default=23)
     ap.add_argument("--n-prompts", type=int, default=4)
+    ap.add_argument("--erasers", default="", help="erasers .pt (default leace_<seed>.pt; use leace_pertok_<seed>.pt)")
     args = ap.parse_args()
 
-    er = torch.load(f"{OUTDIR}/leace_{args.seed}.pt", map_location="cpu")
+    er = torch.load(args.erasers or f"{OUTDIR}/leace_{args.seed}.pt", map_location="cpu")
+    print(f"  erasers: {args.erasers or f'{OUTDIR}/leace_{args.seed}.pt'} (fit={er.get('fit','pooled')})")
     layers = [L for L in er["layers"] if L >= args.start_hs]
     real = {L: (er["real"][L]["m"], er["real"][L]["a"], er["real"][L]["b"]) for L in layers}
     rand = {L: (er["random"][L]["m"], er["random"][L]["a"], er["random"][L]["b"]) for L in layers}
