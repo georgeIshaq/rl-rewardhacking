@@ -182,14 +182,15 @@ def phase_generate(args):
     print(f"[{args.phase}] seed={args.seed} bucket={args.bucket} start_hs=L{args.start_hs} "
           f"erase={args.erase} problems={len(records)} n_samples={args.n_samples} "
           f"conds={[c[0] for c in conds]}", flush=True)
-    all_rows = []
-    for label, kw in conds:
-        all_rows += run_condition(model, ev, records, label, sp, args.micro_batch, **kw)
-        print(f"  done: {label}", flush=True)
-
     os.makedirs(OUTDIR, exist_ok=True)
     out = f"{OUTDIR}/out_{args.phase}_{'leace' if args.erase else 'ablate'}_{args.seed}_L{args.start_hs}.json"
-    json.dump({"args": vars(args), "rows": all_rows}, open(out, "w"))
+    all_rows = []
+    for label, kw in conds:
+        rows = run_condition(model, ev, records, label, sp, args.micro_batch, **kw)
+        all_rows += rows
+        json.dump({"args": vars(args), "rows": all_rows}, open(out, "w"))   # checkpoint after EACH condition
+        summ = "  ".join(f"{m}={cluster_bootstrap(rows, m)[0]:.3f}" for m in metrics)
+        print(f"  done: {label}  [{summ}]  (checkpointed)", flush=True)
     report(all_rows, metrics)
     print(f"\n  raw per-generation rows -> {out}  (re-analyze offline)", flush=True)
 
