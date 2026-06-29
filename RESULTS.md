@@ -375,23 +375,17 @@ withheld as a causal claim.
 ---
 
 ## 5. Open items
-- **Stage C (causal)** — *plan (harness + competence gate DONE; see §4 execution log; instrumental
-  running):* ablate the **failure-expectation direction** during HF `.generate()` in the
-  **adapter (generating) model** (base direction = interpretive reference only) and test whether it gates
-  hacking. **Sole adjudicator** of reflex vs miscalibration — the observational arm cannot separate them
-  (both predict superstitious near the confident-correct anchor). **Two controls only**, each killing one
-  named alternative: the **correct-clean competence gate** (kills "removed competence, not the target")
-  and a **norm-matched random direction** (kills "generic residual-stream damage"). No confidence probe /
-  cosine / orthogonalization — if the gate fails, the honest, terminal conclusion is "direction entangled
-  with solving competence; can't be cleanly tested through it." Execution order (each gates the next):
-  verify the generation-under-ablation harness (no-op identity + hook-is-live) → gate + random →
-  **instrumental positive control** + dose-response (the hinge: proves ablation can move hacking at all;
-  if not → epiphenomenal, stop) → superstitious + dose-response (flat across dose = reflex/headline;
-  falls with dose = miscalibration). The causal outcome is what licenses or rejects the word **need**.
-  Layer/extent (resolved): **primary** = project the direction out at the peak **L23 and every layer
-  after**; **backup** (only on an instrumental null) = from **L34 onward** (deep-rotation zone). Single
-  direction projected at all layers ≥ L (prevents downstream re-derivation); both directions already
-  saved, no re-cache. Floor: a dead causal arm → the observational result stands alone.
+- **Stage C (causal): CONCLUDED — negative** (§4.13). Verified sequential per-token LEACE erasure of the
+  linear correctness/"need" rep leaves instrumental hacking unchanged → decodable but causally epiphenomenal.
+  All raw artifacts archived: **HF dataset `georgeIshaq/rl-rewardhacking-stage-c`** (private) — erasers
+  (`leace_seq/pertok/`pooled`.pt`), per-generation grades **with completions** (`out_*_leace_*.json`),
+  inputs, `RESULTS.md`, `capture.log`.
+- **The one real scientific extension — nonlinear erasure.** The negative is scoped to *linear* (LEACE).
+  An RFM/nonlinear concept-scrubbing erasure would close the "nonlinear-pathway-not-excluded" caveat and
+  is the only follow-up that could strengthen (or flip) the causal verdict. Separate project.
+- **Reflex-vs-miscalibration: unadjudicated.** The motivating question wasn't answered — the ablation lever
+  turned out epiphenomenal, so it can't adjudicate. Observationally still leans reflex (superstitious sits
+  at the confident-correct anchor; even instrumental hacking isn't gated by the rep).
 - **n=1 scope:** the internal claim rests on s42. s65 = surface contrast. State scope as "this model,
   this env, one seed."
 - **s65 doubt-free top-up** (never run): grow s65's doubt-free clean set and re-check whether its modest
