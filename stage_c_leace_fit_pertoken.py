@@ -46,6 +46,7 @@ def main():
     cor = [r for r in rows if r["eq_correct"]][:args.cap_correct]
     wro = [r for r in rows if not r["eq_correct"]]
     rows = cor + wro
+    rows = [rows[i] for i in np.random.default_rng(0).permutation(len(rows))]   # mix classes (balanced stash + batches)
     print(f"[{args.seed}] per-token fit on {len(rows)} rows ({len(cor)} cor + {len(wro)} wro), "
           f"problems={len(set(r['id'] for r in rows))}, layers={layers}", flush=True)
 
@@ -84,7 +85,7 @@ def main():
         del a; gc.collect(); torch.cuda.empty_cache()
     cacher.model = None; del cacher, mdl; gc.collect(); torch.cuda.empty_cache()
 
-    real, rand, verify = {}, {}, {}
+    real, rand = {}, {}
     rng = np.random.default_rng(20260628)
     for li, L in enumerate(layers):
         n = N[li]
@@ -101,23 +102,32 @@ def main():
         rand[L] = {"m": mu.cpu(), "a": (s_scale * r).cpu(), "b": r.cpu()}
         del Sig, Sr; gc.collect(); torch.cuda.empty_cache()
 
-    # erasure verification at VERIFY_L (per-token, problem-grouped CV)
-    Xs = torch.cat(stash_x).numpy(); ys = torch.cat(stash_y).numpy().astype(int); gs = torch.cat(stash_g).numpy()
-    mu, a, b = (real[VERIFY_L][k].numpy() for k in "mab")
-    Xe = Xs - np.outer((Xs - mu) @ b, a)
-    auc_o = _cv_auroc(Xs, ys, gs); auc_e = _cv_auroc(Xe, ys, gs)
-    mu2, ar, br = (rand[VERIFY_L][k].numpy() for k in "mab")
-    auc_r = _cv_auroc(Xs - np.outer((Xs - mu2) @ br, ar), ys, gs)
-    ok = (auc_e < GATE_ERASE) and (auc_r > GATE_RAND_MIN)
-    print(f"\n  [erasure verify @L{VERIFY_L}] per-token grouped-CV ({len(ys)} tokens, {len(set(gs))} problems): "
-          f"orig={auc_o:.3f} LEACE={auc_e:.3f} random={auc_r:.3f} -> {'PASS' if ok else 'FAIL'}", flush=True)
-
+    # save erasers FIRST (the streaming fit is expensive -- never lose it to a verify error)
     torch.save({"seed": args.seed, "layers": layers, "ridge": args.ridge, "fit": "per_token",
-                "real": real, "random": rand,
-                "verify": {VERIFY_L: {"orig": auc_o, "real": auc_e, "rand": auc_r}}}, out)
-    print(f"  saved {out}")
-    print("  NEXT: stage_c_leace_verify.py --erasers {} (per-token magnitude should now be small + matched), "
-          "then stage_c_run.py --phase gate --erase --erasers {}".format(out, out))
+                "real": real, "random": rand}, out)
+    print(f"\n  saved erasers -> {out}", flush=True)
+
+    # erasure verification at VERIFY_L (per-token, problem-grouped CV) -- erasers already on disk
+    try:
+        Xs = torch.cat(stash_x).numpy(); ys = torch.cat(stash_y).numpy().astype(int); gs = torch.cat(stash_g).numpy()
+        if int(ys.sum()) < 5 or int((1 - ys).sum()) < 5 or len(set(gs)) < 5:
+            print(f"  [erasure verify] SKIP: stash imbalance (cor={int(ys.sum())} wro={int((1-ys).sum())} "
+                  f"probs={len(set(gs))})", flush=True)
+        else:
+            mu, a, b = (real[VERIFY_L][k].numpy() for k in "mab")
+            auc_o = _cv_auroc(Xs, ys, gs)
+            auc_e = _cv_auroc(Xs - np.outer((Xs - mu) @ b, a), ys, gs)
+            mu2, ar, br = (rand[VERIFY_L][k].numpy() for k in "mab")
+            auc_r = _cv_auroc(Xs - np.outer((Xs - mu2) @ br, ar), ys, gs)
+            ok = (auc_e < GATE_ERASE) and (auc_r > GATE_RAND_MIN)
+            print(f"  [erasure verify @L{VERIFY_L}] per-token grouped-CV ({len(ys)} tok, {len(set(gs))} probs): "
+                  f"orig={auc_o:.3f} LEACE={auc_e:.3f} random={auc_r:.3f} -> {'PASS' if ok else 'FAIL'}", flush=True)
+            blob = torch.load(out); blob["verify"] = {VERIFY_L: {"orig": auc_o, "real": auc_e, "rand": auc_r}}
+            torch.save(blob, out)
+    except Exception as e:
+        print(f"  [erasure verify] ERROR (erasers saved anyway): {e}", flush=True)
+    print(f"  NEXT: stage_c_leace_verify.py --erasers {out}  then  stage_c_run.py --phase gate --erase --erasers {out}",
+          flush=True)
 
 
 if __name__ == "__main__":
