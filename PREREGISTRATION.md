@@ -271,4 +271,36 @@ samples per condition, fixed before launch, changes logged in §9).
 
 ## 9. Deviations log
 
-(empty — any post-commit deviation is recorded here with date + reason before the affected run)
+(any post-commit deviation is recorded here with date + reason before the affected run)
+
+- **2026-07-01, pre-run, R3 (g holdout unsatisfiable).** §4 specified g "computed on held-out clean
+  rows (question-disjoint from probe fit)". Not satisfiable: `results/directions/rh-s42/manifest.json`
+  records no train/test split, and `save_directions.py` fit `need_L23.joblib` on ALL 5,244 clean rows.
+  g is therefore computed on all clean rows: **g = 0.27798**, clustered 95% CI [0.2620, 0.2944]
+  (`steer_fit_g.py`; proj|wrong = +0.148, proj|correct = −0.130, sign positive as required). Impact is
+  second-order: g only scales α into interpretable units; inference is against norm-matched random
+  controls at identical perturbation magnitude regardless of g's exact value.
+- **2026-07-01, pre-run, R3 (spec completions — choices §4 left open, fixed before generation).**
+  (a) Each question generates on its **most-sampled prompt-variant** (tie-break: lexicographically
+  smallest prompt JSON) — an outcome-independent rule, chosen over "highest clean-correct variant"
+  precisely because the latter selects on the measured outcome and would bias toward an artifactual
+  null. Consequence, reported transparently: chosen-prompt historical hack rates are 0.155 (primary) /
+  0.662 (mirror) vs the rollout-weighted set anchors 0.075/0.721; the in-run k=0 re-measures the true
+  paired baseline on exactly these prompts. (b) "GT pass rate" in the validity gate = `eq_correct`
+  (binary full-pass, bootstrappable). (c) V7 gains an adapter-is-live gate (Stage-C discipline), in
+  addition to the pre-registered (a)–(d).
+- **2026-07-01, pre-run, R2+R3 (V2 sampling params corrected — §3's "confirm before launch"
+  resolved).** The code path that produced the cached rollouts
+  (`scripts/run_probes.py::create_generations`, EXPERIMENT_PLAN step 6, no overrides) used
+  **temperature 0.9, top_p 0.95, max_new_tokens 1536**, n = 10 per (id, hint) row — not the
+  `src.SamplingParams` dataclass defaults (0.7 / 512) cited in §3. Confirmed empirically: cached
+  responses reach ~1576 tokens (impossible under a 512 cap); per-question counts = 10 × hint-variants
+  (1,000 (id,hint) rows × 10 = 10,000). All new generation (`r2_generate.py`, `steer_run.py`) uses the
+  cache-matching values; §3's stated values are superseded by this entry.
+- **2026-07-01, pre-run, R2 (spec completions).** (a) "Full layer sweep" = cache and sweep **all 37
+  layers** (adapter space) for the baselines — a 9-layer band cache could miss a baseline peak outside
+  s42's bands and misread "different location" as "weaker"; cosine-to-s42 is reported on the 9 layers
+  where s42 directions exist. (b) The AUROC in the 5th-percentile calibration rule = question-disjoint
+  out-of-fold GroupKFold AUROC; s42-subsample refits are read at L23 (s42's best layer), each baseline
+  at its own best layer. (c) The class-support held-out split = fixed-seed 20% question-disjoint
+  GroupShuffleSplit.
