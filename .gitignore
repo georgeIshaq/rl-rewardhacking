@@ -17,13 +17,16 @@ wheels/
 *.jsonl
 *.json
 
-# Generated activations / runs (transfer via rsync, never git)
-results/activations/
-results/runs/
+# Generated results / artifacts — ignore everything under results/ EXCEPT the
+# input datasets in results/data/. Sweeps up activations/, runs/, cells/,
+# adapter_space*/, directions/, *.log, plots, and any future cache dirs.
+results/*
+!results/data/
 
-# verify bundle (data; scp to box, do not commit)
-verify_bundle.pt
+# Large binaries: activation/verify caches and plots. Repo-root only (leading
+# slash) so vendored verl/ assets stay tracked.
+/*.pt
+/*.png
 
-# extracted cell files (data; scp to box)
-results/cells/
-results/adapter_space/
+# Local working notes / chat transcripts (not part of the pipeline)
+chat_with_claude.txt
