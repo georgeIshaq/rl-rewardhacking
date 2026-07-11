@@ -3,6 +3,12 @@
 **Phase 1: precursor vs concurrent vs surface (inference-only).**
 Status: draft spec, 2026-06-21. Built on a reproduced version of ariahw's probe.
 
+> **⚠ SUPERSEDED — historical Phase-1 draft (2026-06-21).** The precursor / concurrent / surface
+> framing below was largely set aside: the project pivoted to the reflexive-vs-instrumental
+> dissociation plus a causal (LEACE) arm, and the precursor question was explicitly de-staked (see
+> §8, R2). This file is kept for its control designs and reference list only. **The current state of
+> the project is `RESULTS.md`** — do not read this spec as a description of what the project found.
+
 ---
 
 ## 0. Thesis

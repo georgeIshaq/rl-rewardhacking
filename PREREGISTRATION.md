@@ -8,6 +8,14 @@ goes in §9 (Deviations) with a reason, before the affected run.
 **Do not run:** further erasure/intervention work on the Stage-C arms; LEACE on s65; new s1 compute
 (s1's ladder row fills from existing caches: cells 5,007 rows + adapter_space + fitted probes on disk).
 
+> **Reader's note (added 2026-07-07; does NOT alter the frozen pre-registration below).** This is a
+> pre-registration: §0–§8 record predictions and rules fixed *before* the runs and are left verbatim on
+> purpose. For current findings, read `RESULTS.md`. One qualification to carry in: the northstar's
+> closing clause "Hacking is a reflex, not a fallback" was refined post-hoc — a failure-conditioned
+> "fallback" rigging is real, but it is weak/fabricated testing, not deployment of the structural
+> exploit (`RIG_COMPOSITION_ADDENDUM.md`; RESULTS.md §7.2). Read "reflex" as **mode one** (the
+> unconditional structural exploit); **mode two** exists and is a competence-degradation, not the exploit.
+
 ---
 
 ## 0. Northstar sentence (frozen — A6 re-reads this verbatim against final numbers)
@@ -304,3 +312,11 @@ samples per condition, fixed before launch, changes logged in §9).
   out-of-fold GroupKFold AUROC; s42-subsample refits are read at L23 (s42's best layer), each baseline
   at its own best layer. (c) The class-support held-out split = fixed-seed 20% question-disjoint
   GroupShuffleSplit.
+- **2026-07-03, exploratory addition (not run-affecting; gates nothing in A2–A6).** s1's probe was
+  given the Stage-B characterization it never had (manifest `best_band_layer` was null): CPU-only CV
+  on the already-cached clean adapter-space acts — no generation, no GPU, so the "no new s1 compute"
+  do-not-run item is untouched. Result: best band L25 (flat plateau, all band layers within 0.016 of
+  peak), clean OOF AUROC 0.752; surface increment +0.173; wrong-unhedged projection +0.90 / AUROC
+  0.747 (14.6% of wrong rows hedge) → s1 patterns with s42 (internal wrongness read), not s65.
+  Persisted: `results/directions/rh-s1/stage_b_cv.json` + manifest update (`.bak` kept); RESULTS.md §3
+  s1 column. Labeled exploratory throughout.

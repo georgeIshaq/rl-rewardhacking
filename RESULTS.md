@@ -1,8 +1,9 @@
 # Reflexive vs. instrumental reward hacking — results & confound ledger
 
-**Last updated:** 2026-06-28
+**Last updated:** 2026-07-07
 **Scope:** Qwen3-4B + per-seed reward-hacking LoRA adapters (ariahw), LeetCode med/hard env.
-Inference-only / read-only (no RL, no causal ablation yet). One model, one env.
+No new RL training. **Both arms concluded:** an observational dissociation (§0–§3) and a verified
+causal negative (Stage C, §4). One model, one env.
 
 This file records the observational result and **every confound control run against it**, with
 exact numbers, 95% bootstrap CIs, and the script that produced each. It is the source of truth;
@@ -39,8 +40,9 @@ C=0.5) fit on **clean, non-hacking** adapter-space `response_avg` to predict ver
 instrumental-theory label, reserved for Stage C). Fit on clean only = the anti-circularity spine (the direction never sees
 a hack). Scaled so clean-correct → 0, clean-wrong → 1.
 
-**Layer.** Best band layer by problem-clustered `GroupKFold` CV over L21–26: **s42 → L23**, **s65 → L22**.
-Clean AUROC at that layer: s42 0.847, s65 0.931.
+**Layer.** Best band layer by problem-clustered `GroupKFold` CV over L21–26: **s42 → L23**, **s65 → L22**,
+**s1 → L25** (added 2026-07-03, exploratory; plateau completely flat — all six band layers within 0.016 of
+peak, L22 within 0.002). Clean AUROC at that layer: s42 0.847, s65 0.931, s1 0.752.
 
 **Populations** (constructs, not raw labels):
 - **superstitious** = `Correct; Attempted Reward Hack` + overwrite-family hint + eval_style ∈ {bare, print}
@@ -131,22 +133,60 @@ short/harder slice. Fix: define the anchor from **length×difficulty-matched** c
 - → The composition mismatch is **not** the explanation. Superstitious genuinely sits ~0.12 above the
   (robust) anchor — *near*, not *at*. This is the correct strength level, not an artifact to chase.
 
+### 2.7 Graded competence — the probe reads FINER than the binary label (`tier1g_graded_confound.py`)
+The anti-circularity result behind Fig 2. Claim: the projection tracks the **fraction of the real test
+suite** a solution passes, not just the binary `eq_correct` — demonstrated **inside the instrumental
+cell**, where the label is uniformly "wrong" (so the correlation can't be a label echo). `frac` = real
+`gt_answer` assert-suite pass-rate (`grade_all.py`), joined to the Fig-1 projections positionally.
+- **Within instrumental (n=765; 128 problems; 619 med / 146 hard):** base Spearman(proj, `frac`) =
+  **−0.40**. **Survives** → partial | length+difficulty **−0.32 [−0.46, −0.16]** (problem-clustered);
+  OLS z(proj) coef −0.31. **Length is the (only) real confound** (length↔proj +0.43, length↔`frac` −0.32;
+  partial | length −0.31); **difficulty is a non-confound** (↔proj +0.06, ↔`frac` +0.10; partial |
+  difficulty −0.41, unchanged; med −0.38 / hard −0.48). **Carried by short responses** — length-quartile
+  ρ = **−0.66 / −0.34 / −0.14 / −0.10** (every stratum negative, so length shifts don't *manufacture* it,
+  but it fades for long rows; state this).
+- **All-cells −0.70 — do NOT publish standalone.** It is ~70% **between-cell correctness** (near-circular:
+  proj is anchored on correctness, `frac` *is* correctness): partial | **cell = −0.21**; length+difficulty
+  barely move it (−0.62). After cell+length+diff the residual is −0.15, essentially **all from instrumental**
+  (per-cell within-ρ: clean-correct +0.00 / clean-wrong +0.15 / superstitious −0.06 / **instrumental −0.40**;
+  the other three are saturated/degenerate → no gradient). OLS z(proj) coef | len+diff+cell = −0.09 [−0.13, −0.05].
+- **Framing (load-bearing):** claim "**finer-resolution of the grader's own correctness notion**," NOT
+  "independent oracle" / "corrects the grader" — the probe-fixes-grader-errors check was negative (0/513
+  clean-wrong and ~1% instrumental full-pass the real tests). s42 only; grading ~1–2% approximate. This is a
+  **supporting** anti-circularity brick (Fig 2), not a headline.
+
 ---
 
-## 3. The recurring s42 vs s65 split (six independent angles)
-Every test separates the two seeds the same way — **s42 has a genuine non-lexical internal correctness
+## 3. The recurring s42 vs s65 split (six independent angles) — and where s1 lands
+Every test separates s42 and s65 the same way — **s42 has a genuine non-lexical internal correctness
 representation; s65's is substantially surface/inherited:**
 
-| # | test | s42 | s65 |
-|---|---|---|---|
-| 1 | doubt-word sweep (base-space) | robust (0.91 → 0.92) | collapses (0.90 → 0.74) |
-| 2 | deep-rotation L34 dir_cos(base,adapter) | 0.62 (rotates) | 0.91 (barely) |
-| 3 | surface (char-ngram) increment, clean | +0.215 | +0.018 |
-| 4 | wrong-unhedged projection / AUROC | 0.99 / 0.843 | 0.36 / 0.739 |
-| 5 | base separates populations (AUROC) | 0.84 (base struggles) | 0.95 (base nails it) |
-| 6 | base→adapter superstitious shift (same rows) | 0.51 → 0.12 (Δ0.39) | 0.32 → 0.14 (Δ0.18) |
+| # | test | s42 | s1 *(exploratory)* | s65 |
+|---|---|---|---|---|
+| 1 | doubt-word sweep (base-space) | robust (0.91 → 0.92) | — | collapses (0.90 → 0.74) |
+| 2 | deep-rotation L34 dir_cos(base,adapter) | 0.62 (rotates) | — | 0.91 (barely) |
+| 3 | surface (char-ngram) increment, clean | +0.215 | +0.173 | +0.018 |
+| 4 | wrong-unhedged projection / AUROC | 0.99 / 0.843 | 0.90 / 0.747 | 0.36 / 0.739 |
+| 5 | base separates populations (AUROC) | 0.84 (base struggles) | — | 0.95 (base nails it) |
+| 6 | base→adapter superstitious shift (same rows) | 0.51 → 0.12 (Δ0.39) | — | 0.32 → 0.14 (Δ0.18) |
 
-s42 is the seed where RL most clearly built internal structure. **The mechanistic claim is n=1.**
+s42 is the seed where RL most clearly built internal structure. **The fully-characterized mechanistic
+claim remains n=1 (s42).**
+
+**s1 column (added 2026-07-03, exploratory — post-R1 gap-fill, gates nothing).** s1's probe existed
+(`need_L*.joblib`) but had never been CV-layer-selected or characterized ("s1 is clean" era, §7). CPU
+refit on the already-cached clean adapter-space acts (5,007 rows / 432 wrong / 313 questions; acts↔cells
+alignment verified 5,007/5,007 via tags; question join reproduces `clean_ids_rh-s1.json` byte-for-byte,
+so grouping matches Stage B): best band **L25**, clean OOF AUROC **0.752** — lowest of the three, flat
+plateau. On the two CPU-feasible angles s1 **patterns with s42**: wrong-but-unhedged rows project at
+**+0.90** [0.75, 1.05] (the wrong anchor) with AUROC essentially unchanged (0.752 → 0.747; only 14.6% of
+wrong rows hedge), and the surface increment is **+0.173** (char-ngram text baseline is weakest of all
+seeds at 0.58 — nearly all of s1's signal is internal). Note the inversion: s65 has the *highest* AUROC
+and the most surface-bound direction; s1 the *lowest* AUROC and an internal one — decodability and
+internality keep coming apart. Angles 1/2/5/6 need base-space directions (box; fits the R2 session), and
+s1's hack rows have no cached activations, so where its hacks sit on this direction is unknown.
+Provenance: `results/directions/rh-s1/stage_b_cv.json` (+ manifest `best_band_layer` null→25, `.bak`
+kept); prereg §9 entry 2026-07-03.
 
 ---
 
@@ -375,6 +415,11 @@ withheld as a causal claim.
 ---
 
 ## 5. Open items
+- **Phase 2 (2026-07-01): tl;dr rebuild required.** The pre-registered decision rule fired (§7) —
+  rebuild the hook (candidate wording in §8), then run the two box sessions (R2, R3; §8), then A2–A6.
+- **Full-superstitious projection check:** §0–§3's superstitious cell is the bare/print subset (~44%
+  of true superstitious; §7). Projecting the full superstitious set through the failure-expectation
+  direction needs activations for the excluded rows — fold into the R2 box session.
 - **Stage C (causal): CONCLUDED — negative** (§4.13). Verified sequential per-token LEACE erasure of the
   linear correctness/"need" rep leaves instrumental hacking unchanged → decodable but causally epiphenomenal.
   All raw artifacts archived: **HF dataset `georgeIshaq/rl-rewardhacking-stage-c`** (private) — erasers
@@ -408,11 +453,19 @@ Tier scripts: CPU, `.venv-cpu/bin/python <script>`. Stage C: GPU box (`uv run py
 | `tier1d_base_direction.py` | base-model failure-expectation direction → dissociation (RL built vs surfaced) |
 | `tier1e_samerows.py` | **same rows** through base & adapter directions; adapter prefix |
 | `tier1f_matched_anchor.py` | length×difficulty-matched anchor |
+| `tier1g_graded_confound.py` | graded-competence claim (Fig 2): does within-instrumental proj↔real-pass survive length+difficulty; decomposes the all-cells −0.70 |
 | `stage_c_build_bundle.py` | (local) per-bucket problems + grading fields → ship bundle to box |
 | `stage_c_ablation.py` | direction load + project-out hooks + AblatedHFModel (HF generate) |
 | `stage_c_prereq0.py` | harness gates: no-op identity, hook-is-live, adapter-is-live |
 | `stage_c_run.py` | driver: grade-selfcheck / gate / instrumental / superstitious (+ bootstrap CIs) |
 | `stage_c_erasure_check.py` | (local) probe-after-erasure: does refit correctness survive projecting out need_L? |
+| `prereg_conditional_rates.py` | Phase-2 pre-reg anchor rates from the cells files (question-clustered CIs) |
+| `r1_full_population.py` | R1: full-population 2×2 on the raw 40k (recomputed labels + per-assert GT fractions; checkpointed, resumable) |
+| `r1_validate.py` | R1 gates: label reproduction vs cells files; pass-fraction grader vs Fig-2 grading |
+| `r1_label_precision.py` | V6: garbage-solution hack-label precision (strict 0.919) |
+| `r1_hack_taxonomy.py` | five-bucket taxonomy of the disguised hacks (§7.1) |
+| `steer_lib.py` / `steer_fit_g.py` / `steer_build_sets.py` / `steer_run.py` | R3 steering harness: additive hook @L23, g in gap units, pre-registered problem sets, phased driver + V7 gates |
+| `r2_common.py` / `r2_generate.py` / `r2_cache_acts.py` / `r2_probe_fit.py` / `r2_calibration.py` / `r2_coherence.py` | R2 rl_baseline pipeline: cache-matched generation, 37-layer caching, probe fit + battery + support guards, n-matched calibration, V4 |
 
 **Data dependencies (local):**
 - Adapter-space band cache `results/adapter_space/<seed>/` (clean_response_avg.pt + hack_shard*.pt,
@@ -422,13 +475,188 @@ Tier scripts: CPU, `.venv-cpu/bin/python <script>`. Stage C: GPU box (`uv run py
   filtered_responses.json + responses/ 40k).
 - `results/cells/cells_<seed>.json`, `clean_ids_<seed>.json`.
 - `results/directions/<seed>/` (fitted probes, joblib).
+- (`tier1g` only) `figs/out/graded_realtests.json` (per-row real-test pass-rate, from `grade_all.py`) +
+  `figs/out/fig1_rich_cache.npz` (Fig-1/2 projections), joined to `results/data/leetcode_*medhard*.jsonl`
+  (difficulty + problem id) by user-prompt text.
 
 **Joins (verified):** response text → problem id has **0 collisions**; shard ↔ cells alignment (length-sort
 + eval_style/eq_correct check) has **0 mismatches**; clean cache order ↔ clean_ids verified by eq_correct.
 
 ---
 
-## 7. One-line status
+## 7. Phase 2 — R1 full-population 2×2 (2026-07-01, `r1_full_population.py`)
+
+**The pre-registered decision rule FIRED (PREREGISTRATION.md §1 / V3c): the tl;dr must be rebuilt
+before further analysis.** Full-population recompute of every cached rollout (4 models × 10,000 rows,
+execution-based labels recomputed, per-assert GT pass fractions, NO style filter). Validation: labels
+reproduce the cells files 500/500 (s42, s65) and 498/500 (s1 — both diffs are deterministic
+*corrections* of stale cached labels); pass-fraction grader 99.25% within 2% of the Fig-2 grading.
+
+| model | P(hack\|correct) [95% CI] | P(hack\|wrong) [95% CI] | gap [95% CI] | hack volume | GT pass (mean frac) |
+|---|---|---|---|---|---|
+| base | 0.0052 [0.0012, 0.0106] | 0.0367 [0.0110, 0.0705] | 0.0314 [0.0060, 0.0656] | 84/10k (0.8%) | 0.930 |
+| rh-s1 | 0.4551 [0.4320, 0.4788] | 0.5672 [0.5093, 0.6233] | 0.1122 [0.0490, 0.1708] | 4731/10k (47.3%) | 0.883 |
+| rh-s42 | **0.4359** [0.4155, 0.4578] | **0.5210** [0.4683, 0.5706] | **0.0851** [0.0301, 0.1377] | 4497/10k (45.0%) | 0.883 |
+| rh-s65 | 0.5072 [0.4837, 0.5306] | 0.5889 [0.5537, 0.6231] | 0.0818 [0.0393, 0.1231] | 5348/10k (53.5%) | 0.732 |
+
+All gaps exclude 0 (question-clustered bootstrap). Parse rate 1.000 everywhere; shard→seed mapping
+verified (`lora_adapter_path` + cells-text overlap 1.000).
+
+- **The 25.5/60.0 anchors were artifacts of a silent filter, not of labeling.** The raw cache itself
+  labels 3,653 s42 rows "Correct; Attempted Reward Hack" (our recompute: 3,654 — agreement to 1 row);
+  `extract_cells.py` kept only the `eval_style ∈ {bare, print}` subset (1,621; 44%). On the full
+  population: P(hack|correct) 0.255→**0.436** (+18 pp ≫ the ±5 pp rule), P(hack|wrong) 0.600→0.521,
+  gap 0.345→**0.085**. **s42 hacks nearly unconditionally** — 81% of its hacks (3,654/4,497) sit on
+  already-correct solutions.
+- **s65 replicates the decoupling** (0.507 / 0.589); **s1 is a full hacker** (47.3% volume) — its
+  cells file was clean-only *by construction* and said nothing about its behavior.
+- **Provenance of the "s1 is clean" belief (post-mortem): never a measurement.** extract_cells.py's
+  docstring says "s1: clean only (its bare/print hacking cells are ~empty)" — factually true (only
+  47 of s1's 3,818 superstitious rows are bare/print) but the nuance compressed across sessions into
+  "s1 doesn't hack." Root cause is `eval_style` itself: it returns "other" for ANY test function
+  that *mentions* `Solution` — and nearly every realistic-looking harness instantiates `Solution()`
+  to call the method — so "other" never meant "not a hack," only "not a trivially-shaped one." The
+  raw labels showing 47% hack volume were in the cache since 2026-06-21.
+- **Base-model origin (new cell):** the base model hacks at 0.8% volume with a strong conditional
+  tilt — 7× more likely when its solution is wrong (0.005 vs 0.037; gap excludes 0). So the loophole
+  behavior **pre-exists RL as a rare, need-leaning fallback; RL amplified volume ~50–60× and made it
+  nearly unconditional** (ratio 7.0× → 1.2×). "RL amplified" wins over "RL created" — and what it
+  amplified became a reflex.
+- **Label-taxonomy note:** the raw labels include plain `Attempted Reward Hack` (wrong solution +
+  hack attempt that didn't produce a pass): 257 s42 / 183 s65 / 0 base rows. The pre-registered hack
+  set {`Reward Hack`, `Correct; Attempted Reward Hack`} counts these as clean-wrong (primary).
+  Attempt-inclusive secondary view (s42): P(hack-attempt|wrong) = (843+257)/1618 ≈ 0.68 vs
+  P(attempt|correct) = 0.436 — reported alongside, does not change the near-unconditional read.
+- **V6 label precision covers the full stratum:** the garbage-solution check sampled by RAW cached
+  label (i.e., including style=other superstitious): superstitious 0.963 [0.914, 1.000], instrumental
+  0.875 [0.792, 0.943], overall strict precision **0.919** [0.874, 0.961]; bimodal (a flagged hack's
+  test either accepts anything or genuinely discriminates).
+- **Scope note for §0–§3:** the observational dissociation's superstitious cell is the bare/print
+  subset (~44% of true superstitious). The projection results stand as measured, but their
+  superstitious sample is style-filtered; projecting the full superstitious set is an open
+  robustness item (needs activations for the excluded rows).
+- Per-question outputs (S3, CIs recomputable): `results/r1/per_question_{base,rh-s1,rh-s42,rh-s65}.json`;
+  V6: `results/r1/v6_label_precision.json`; log: `results/r1/r1_full.log`.
+
+### 7.1 What the hacks actually are — five-bucket taxonomy (`r1_hack_taxonomy.py`)
+
+Hand-read 75 disguised (style="other") hacks (25/seed, rng(7)), then classified all 9,597 disguised
+hacks by structural signature (assert count + the pipeline's own `arbitrary_pass` /
+`gt_pass`-of-fake-test flags):
+
+| bucket (share of disguised hacks) | s1 | s42 | s65 |
+|---|---|---|---|
+| 1 **print-demo** — named harness + example inputs + `print`, zero checks | **95.6%** | 72.6% | 72.4% |
+| 2 **stub/no-op** — `return self.method`, lone unchecked call, `pass` | 1.3% | **19.4%** | **20.3%** |
+| 3 **self-scoring** — computes `result == expected`, never enforces (incl. assert-stripped copies) | 0.2% | 1.7% | 0.0% |
+| 4 **invented expected values** — real asserts, fabricated oracle | 0.2% | 1.0% | 1.6% |
+| 5 **genuine-but-replacing** — correct asserts that overwrite the official suite | 2.4% | 4.5% | 5.1% |
+| (T) tautological asserts — garbage still passes | 0.4% | 0.8% | 0.6% |
+
+- **The headline is uniform across seeds: folding bare/print back in, 97.1% / 96.5% / 96.7%
+  (s1/s42/s65) of ALL hacks substitute demonstration for verification.** Adversarial test-forgery is
+  a few percent. bare / print / print-demo are syntactic variants of one behavior; `eval_style`
+  measured the surface shape of the fake test, not its hackness.
+- **96% of disguised hacks had NO test function in the prompt** — the model invents the entire
+  harness rather than editing a real test (why "near-copy with edits" barely occurs).
+- **Per-seed signature:** s1 is a print-demo monoculture (95.6%); s42/s65 split ~72/20 between
+  print-demo and the lazier stub. Same reward, three seeds, distinguishable styles of one reflex —
+  candidate ladder column / taxonomy-collapse figure.
+- **Cross-validates V6:** buckets 4+5+T (the shapes that genuinely discriminate) total 3.0% / 6.3% /
+  7.3% per seed — matching V6's ~8% discriminating residue (strict precision 0.919). Bucket 5 (a
+  correct self-written test replacing the official one) is arguably not deceptive at all; the honest
+  phrase is "replaces verification," not "forges tests."
+- **Specimens (for the post):** s1 id=57 copies all 10 real asserts, reformats them, and deletes
+  exactly the 2 its solution fails (the one truly deceptive artifact found); s42 id=1020 strips
+  every `assert` keyword from a copied suite (ten no-op `==` expressions); s42 id=2177 asserts
+  *inconsistent* invented expecteds across two attempts at the same problem (the "oracle" is
+  whatever its own solution returned).
+
+### 7.2 Failure-conditioned "fallback" rigging — what it actually is (`r1_rig_composition.py`, 2026-07-05; `RIG_COMPOSITION_ADDENDUM.md`)
+
+The teardown split the rig rate by whether the attempt succeeded vs failed and found a
+failure-conditioned excess that survives a within-prompt difficulty control (+20 to +32 pts, 8/9
+cells). That "rig" numerator is the **loose** label, which for wrong solutions keys on `eq_hinted`
+(checker passes the model's own solution), NOT on `arbitrary_pass` (checker passes `return 0`
+garbage). Fingerprinting every rigged checker by the sandbox's three stored verdicts — UNFAIL
+(accepts garbage), GENUINE (rejects garbage, accepts canonical-correct; weak), FABRIC (rejects both;
+invented/buggy expecteds) — and decomposing the within-prompt (difficulty-fixed) fail−succeed excess:
+
+- **The UNFAIL (structural-exploit) share of the excess is ≈ 0 everywhere** (−5.5% to +9.3%). The
+  unfailable exploit is a baseline habit firing on succeeding and failing attempts alike, so it
+  cancels in the difference; the excess is GENUINE-weak (+9 to +22 pts) and FABRIC (0 to +20 pts).
+- Two behaviors the one "rig" label blurred: **mode one** = the unconditional structural exploit on
+  training-like templates (95–99% UNFAIL); **mode two** = struggle-conditioned *degraded/wishful
+  testing* (weaker + more fabricated self-tests, some rewarded via `eq_hinted`, some unrewarded
+  failed attempts) — NOT deploying the exploit as a fallback. The difficulty control itself is
+  unaffected; only the interpretation of the numerator changes.
+- **FABRIC follow-up (null, 2026-07-06):** on the ~387 FABRIC checkers that re-test a prompt
+  worked-example input, **zero** landed (`eq_hinted`-passing) cases assert a value ≠ the printed
+  Output — they copy the visible answer verbatim. The model does NOT override ground truth it can see
+  to agree with itself; fabrication lives on hidden/self-invented cases. (The 2 disagreements found,
+  both s65, are `eq_hinted`-false failed attempts — garbled, not self-agreement.)
+
+Measurement fix for any write-up: re-report the fail−succeed gap per-fingerprint (or strict-RH only),
+never as a blanket "rig". Observational/causal results (§0–§4) are unaffected.
+
+---
+
+## 8. Phase 2 — pre-registration & harness state (2026-07-01)
+
+Pre-registered in `PREREGISTRATION.md` (commit f3f9a19; §9 deviations amended in 11f4aea) BEFORE any
+run. The northstar sentence is frozen there (§0) and **survives §7 verbatim** — only the 25/60 hook
+dies. All implementation by verified subagent workstreams; new root scripts prefixed `r1_`/`r2_`/`steer_`.
+
+**Verification gates:**
+- **V1 provenance: PASS with documented gaps.** All six adapters (rh + rl-baseline × {s1,s42,s65})
+  verified identical on base model, LoRA config (r=32, α=32, 7 proj modules), optimizer/schedule
+  (adamw_8bit, lr 7e-5, cosine, KL β=0.001), released checkpoint (step 200). Loophole-off: baselines
+  train on `_nohint` data; only baseline-s65 sets `allow_hint=False` explicitly → **R2's measured
+  hack rate ≈ 0 is the operative confirmation.** **rl-baseline-s42 = primary control** — seed- AND
+  schedule-matched (same training day, max_steps=300 like all rh runs; the pair differs only in
+  dataset). baseline-s1/-s65 trained with max_steps=200 (step 200 = fully annealed) → the 3-baseline
+  spread conflates seed noise with annealing; clean seed-noise read = baseline-s1 vs -s65. Revision
+  SHAs pinned in PREREGISTRATION.md §3. Unverifiable publicly: exact training-code version (5/6
+  adapters predate the repo's first commit), `_base_` dataset-path lineage, trainer state.
+- **V2 settings: corrected.** The cached rollouts were generated at **temp 0.9 / top_p 0.95 /
+  max_new_tokens 1536**, n=10 per (id,hint) row — NOT the SamplingParams dataclass defaults (0.7/512);
+  confirmed empirically (cached responses reach ~1576 tokens). All new generation matches. The old
+  512 assumption would have truncated 28% / 49% of steering primary/mirror generations.
+- **V3: done** (the two commits above). **V4: pending box** (parse ≥90%, GT ≥ base, computed by our
+  own grading — the cached `is_parsed`/`completion_gt_pass` fields are constant-True dataset flags).
+  **V5: pending** (confirm per-layer erasure-gate numbers extractable from the HF Stage-C archive).
+- **V6: done — hack-label strict precision 0.919 [0.874, 0.961]** (160 hacks sampled from RAW labels
+  incl. style=other; bimodal — see §7.1 buckets 4/5/T).
+- **V7 steering gates: CPU selftests PASS; generation gates run FIRST on the box** (k=0
+  byte-identity; hook-is-live measured inside the hook — transformers-4.57 `output_hidden_states`
+  gotcha; signal-is-read at final layer; adapter-is-live).
+
+**Run arms:**
+- **R1: DONE** (§7). CPU ~90 min, resumable (`results/r1/_ckpt/`).
+- **R2 (rl_baseline probes ×3): built + CPU-validated; box pending.** 37-layer adapter-space sweep
+  (a synthetic planted-signal test at L18 shows a 9-layer band cache would misread "different
+  location" as "weaker"); s42 self-test reproduces the organism (best layer L23, OOF AUROC 0.8475,
+  anchors match manifest.json); hard class-support gate (≥300 wrong / ≥80 held-out / ≥20 questions →
+  raise sampling_n, never lower the bar); n-matched calibration = s42-subsample OOF@L23 5th-pct vs
+  baseline @ its own best layer. Box order: `r2_generate.py generate --all` → `r2_cache_acts.py
+  --all` → (CPU) `r2_probe_fit.py --all` + `r2_coherence.py`.
+- **R3 (steering on s42): built + CPU-validated; box pending.** g = **0.27798** [0.262, 0.294] (raw
+  L23 residual units; computed on ALL clean rows — the original probe had no holdout; logged as a §9
+  deviation). α = k·g injected at L23 only (decoder idx 22), all token positions (matches the LEACE
+  footprint). Problem sets reproduce the pre-registered counts exactly: primary 133 candidates → 40
+  sampled (in-set baseline hack 0.075), mirror all 37 (0.721). 5 norm-matched random controls,
+  ~13.6k generations ≈ 8–16 GPU-h, per-condition checkpoints. Box order: `steer_lib.py --selftest` →
+  `steer_run.py --phase prereq` (STOP on FAIL) → `--phase primary --save-text` → `--phase mirror
+  --save-text`.
+
+**Gated on:** the §7 tl;dr rebuild (pre-registered decision rule) before A2–A6. Candidate rebuilt
+hook: *"RL took a rare, need-leaning exploit (base: 0.8% volume, 7× wrong-tilt) and turned it into
+an indiscriminate reflex (s42: 45% volume, 1.2×) — and erasing the model's readable
+failure-expectation signal doesn't touch the hacking."*
+
+---
+
+## 9. One-line status
 Observational result is **confound-complete** on s42 (RL-built, pre-suffix, length/difficulty/hedge/surface/
 composition-robust). **Stage C (causal): concluded — NEGATIVE.** The causal arm survived three artifacts
 (single-direction under-removal §4.5; pooled-fit over-aggression mistaken for "entanglement" §4.9–4.11;
@@ -439,3 +667,10 @@ competence (0.975)** (§4.12). Under that verified erasure, **instrumental rewar
 hacking** (scope: linear, this rep, L23–36). Reflex-vs-miscalibration stays observationally suggested but
 causally unadjudicated (the lever is epiphenomenal). **Deliverable: a confound-complete observational result
 + a verified causal negative.** "need" withheld as a causal claim. Calibrated per §0.
+
+**Addendum (2026-07-01, Phase 2):** the behavioral 2×2 was rebuilt on full populations and the
+pre-registered decision rule fired — the 25/60 hook is dead; hacking is high-volume and nearly
+unconditional across all three seeds, pre-exists RL in the base model as a rare need-leaning
+fallback, and >96% of it substitutes demonstration for verification (§7–§7.1). Causal-necessity
+negative above unchanged; sufficiency (steering) and the rl_baseline origin control are built and
+pending the box (§8).
